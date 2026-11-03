@@ -16,5 +16,13 @@ services:
         value: "0"
       - key: ORBIT_PANEL_PASSWORD
         sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: "https://orbit-bots.onrender.com/auth/google/callback"
       - key: TELEGRAM_BOT_TOKEN
         sync: false
