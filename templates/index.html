@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orbit Bots — Centrum Dowodzenia AI</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="cosmic-theme">
+  <!-- Tło z migoczącymi gwiazdami CSS -->
+  <div class="stars-bg"></div>
+  <div class="twinkle-layer"></div>
+
+  <div class="app-layout">
+    <!-- Pasek boczny / Nawigacja -->
+    <aside class="sidebar glass-panel">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 32 32" class="orbit-logo-svg">
+            <circle cx="16" cy="16" r="10" fill="none" stroke="#7c5cff" stroke-width="2"/>
+            <ellipse cx="16" cy="16" rx="14" ry="5" fill="none" stroke="#22d3ee" stroke-width="1.5" transform="rotate(-30 16 16)"/>
+            <circle cx="16" cy="16" r="4" fill="#7c5cff"/>
+            <circle cx="28" cy="12" r="2" fill="#22d3ee"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Orbit Bots</h1>
+          <span class="version-tag">RTX 3090 • v2.0</span>
+        </div>
+      </div>
+
+      <!-- Kafel Workera GPU Vast.ai -->
+      <div class="vast-card glass-panel" id="vastTile">
+        <div class="vast-header">
+          <span class="vast-title">⚡ Worker GPU (Vast.ai)</span>
+          <span class="badge" id="vastStatusBadge">Sprawdzanie...</span>
+        </div>
+        <div class="vast-stats">
+          <div class="stat-item">
+            <span class="stat-label">Stawka</span>
+            <span class="stat-val" id="vastDph">~0,12 $/h</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Koszt sesji</span>
+            <span class="stat-val" id="vastSessionCost">0,00 $</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Czas sesji</span>
+            <span class="stat-val" id="vastSessionTime">0 min</span>
+          </div>
+        </div>
+        <div class="vast-actions">
+          <button class="btn btn-sm btn-cyan" id="btnStartVast" onclick="confirmStartVast()">▶ Uruchom GPU</button>
+          <button class="btn btn-sm btn-outline-danger" id="btnStopVast" onclick="stopVast()">⏹ Zatrzymaj</button>
+        </div>
+        <div class="vast-idle-note" id="vastIdleNote">Auto-stop: po 10 min bezczynności</div>
+      </div>
+
+      <!-- Lista botów z animowanymi awatarami -->
+      <nav class="bot-nav">
+        <div class="nav-section-title">DOSTĘPNE BOTY</div>
+
+        <!-- Bot 1: Łowca lotów -->
+        <div class="bot-nav-item active" data-bot="flights" onclick="switchBot('flights')">
+          <div class="avatar-container">
+            <!-- Flaga Chin SVG z animowaną falą feTurbulence -->
+            <svg class="avatar-svg china-flag-svg" viewBox="0 0 100 70">
+              <defs>
+                <filter id="flagWave" x="0%" y="0%" width="100%" height="100%">
+                  <feTurbulence type="fractalNoise" baseFrequency="0.04 0.05" numOctaves="2" result="noise">
+                    <animate attributeName="baseFrequency" values="0.03 0.05;0.05 0.03;0.03 0.05" dur="4s" repeatCount="indefinite"/>
+                  </feTurbulence>
+                  <feDisplacementMap in="SourceGraphic" in2="noise" scale="5" xChannelSelector="R" yChannelSelector="G"/>
+                </filter>
+              </defs>
+              <g filter="url(#flagWave)">
+                <rect width="100" height="70" rx="6" fill="#DE2910"/>
+                <!-- Duża gwiazda -->
+                <polygon fill="#FFDE00" points="18,10 20.5,17.5 28,17.5 22,22 24.5,29.5 18,25 11.5,29.5 14,22 8,17.5 15.5,17.5"/>
+                <!-- 4 małe gwiazdy -->
+                <polygon fill="#FFDE00" transform="translate(32, 9) rotate(-20) scale(0.38)" points="18,10 20.5,17.5 28,17.5 22,22 24.5,29.5 18,25 11.5,29.5 14,22 8,17.5 15.5,17.5"/>
+                <polygon fill="#FFDE00" transform="translate(37, 16) rotate(15) scale(0.38)" points="18,10 20.5,17.5 28,17.5 22,22 24.5,29.5 18,25 11.5,29.5 14,22 8,17.5 15.5,17.5"/>
+                <polygon fill="#FFDE00" transform="translate(37, 25) rotate(40) scale(0.38)" points="18,10 20.5,17.5 28,17.5 22,22 24.5,29.5 18,25 11.5,29.5 14,22 8,17.5 15.5,17.5"/>
+                <polygon fill="#FFDE00" transform="translate(32, 33) rotate(65) scale(0.38)" points="18,10 20.5,17.5 28,17.5 22,22 24.5,29.5 18,25 11.5,29.5 14,22 8,17.5 15.5,17.5"/>
+              </g>
+            </svg>
+            <span class="status-dot dot-green" id="dot-flights" title="Aktywny"></span>
+          </div>
+          <div class="bot-info">
+            <div class="bot-name">Łowca lotów</div>
+            <div class="bot-desc">Trasy PL, Ryanair & RSS Fly4free</div>
+          </div>
+          <div class="badge-counter" id="badge-flights">0</div>
+        </div>
+
+        <!-- Bot 2: Dzienny -->
+        <div class="bot-nav-item" data-bot="daily" onclick="switchBot('daily')">
+          <div class="avatar-container">
+            <!-- Satelita na orbicie SVG z obrotem CSS -->
+            <svg class="avatar-svg satellite-svg" viewBox="0 0 100 100">
+              <defs>
+                <radialGradient id="satPlanetGrad" cx="35%" cy="35%" r="65%">
+                  <stop offset="0%" stop-color="#38bdf8"/>
+                  <stop offset="55%" stop-color="#1e3a8a"/>
+                  <stop offset="100%" stop-color="#090d16"/>
+                </radialGradient>
+              </defs>
+              <circle cx="50" cy="50" r="18" fill="url(#satPlanetGrad)"/>
+              <ellipse cx="50" cy="50" rx="36" ry="14" fill="none" stroke="rgba(34,211,238,0.35)" stroke-dasharray="3,3" transform="rotate(-20 50 50)"/>
+              <!-- Satelita obracający się na orbicie -->
+              <g class="orbit-sat-group">
+                <rect x="-4" y="-3.5" width="8" height="7" rx="1.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="0.8"/>
+                <rect x="-12" y="-2" width="7" height="4" rx="0.5" fill="#0284c7" stroke="#38bdf8" stroke-width="0.5"/>
+                <rect x="5" y="-2" width="7" height="4" rx="0.5" fill="#0284c7" stroke="#38bdf8" stroke-width="0.5"/>
+                <line x1="0" y1="-3.5" x2="0" y2="-7" stroke="#e2e8f0" stroke-width="0.8"/>
+                <circle cx="0" cy="-7" r="1" fill="#22d3ee"/>
+              </g>
+            </svg>
+            <span class="status-dot dot-green" id="dot-daily" title="Aktywny"></span>
+          </div>
+          <div class="bot-info">
+            <div class="bot-name">Dzienny</div>
+            <div class="bot-desc">Pamięć, Open-Meteo, NBP & Wiki</div>
+          </div>
+          <div class="badge-counter" id="badge-daily">0</div>
+        </div>
+
+        <!-- Bot 3: Wideo -->
+        <div class="bot-nav-item" data-bot="video" onclick="switchBot('video')">
+          <div class="avatar-container">
+            <!-- Kometa z taśmą filmową SVG -->
+            <svg class="avatar-svg comet-svg" viewBox="0 0 100 100">
+              <defs>
+                <linearGradient id="cometGrad" x1="100%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#7c5cff" stop-opacity="0.95"/>
+                  <stop offset="50%" stop-color="#22d3ee" stop-opacity="0.7"/>
+                  <stop offset="100%" stop-color="#070b1a" stop-opacity="0.1"/>
+                </linearGradient>
+              </defs>
+              <!-- Ogon taśmy filmowej -->
+              <path d="M72,28 C56,40 40,38 26,56 C16,70 8,82 4,88" fill="none" stroke="url(#cometGrad)" stroke-width="12" stroke-linecap="round"/>
+              <path d="M70,24 C54,36 38,34 24,52 C14,66 6,78 3,84" fill="none" stroke="#070b1a" stroke-width="1.8" stroke-dasharray="2,3"/>
+              <path d="M74,32 C58,44 42,42 28,60 C18,74 10,86 5,92" fill="none" stroke="#070b1a" stroke-width="1.8" stroke-dasharray="2,3"/>
+              <!-- Szpula filmowa obracająca się -->
+              <g class="comet-reel-group" transform="translate(72, 28)">
+                <circle cx="0" cy="0" r="14" fill="#1e1b4b" stroke="#7c5cff" stroke-width="2.5"/>
+                <circle cx="0" cy="0" r="11" fill="#312e81" stroke="#22d3ee" stroke-width="1"/>
+                <g class="spinning-reel">
+                  <circle cx="0" cy="-6" r="2.2" fill="#070b1a" stroke="#7c5cff" stroke-width="0.6"/>
+                  <circle cx="5.2" cy="3" r="2.2" fill="#070b1a" stroke="#7c5cff" stroke-width="0.6"/>
+                  <circle cx="-5.2" cy="3" r="2.2" fill="#070b1a" stroke="#7c5cff" stroke-width="0.6"/>
+                  <circle cx="0" cy="0" r="2.5" fill="#f8fafc"/>
+                </g>
+              </g>
+            </svg>
+            <span class="status-dot dot-green" id="dot-video" title="Aktywny"></span>
+          </div>
+          <div class="bot-info">
+            <div class="bot-name">Wideo</div>
+            <div class="bot-desc">AI Generator (HF & Wan 2.1)</div>
+          </div>
+          <div class="badge-counter" id="badge-video">0</div>
+        </div>
+      </nav>
+
+      <!-- Dolne przyciski nawigacji: Alerty, Sejf, Kolejka -->
+      <div class="sidebar-footer">
+        <button class="btn btn-outline full-width" onclick="openModal('alertsModal')">
+          🔔 Alerty (<span id="totalAlertsCount">0</span>)
+        </button>
+        <button class="btn btn-outline full-width" onclick="openModal('vaultModal')">
+          🔐 Sejf kluczy
+        </button>
+        <button class="btn btn-outline full-width" onclick="openModal('jobsModal')">
+          📋 Kolejka zadań
+        </button>
+      </div>
+    </aside>
+
+    <!-- Główny panel roboczy -->
+    <main class="main-content">
+      <!-- BOT 1: ŁOWCA LOTÓW -->
+      <section class="bot-view active" id="view-flights">
+        <header class="view-header glass-panel">
+          <div>
+            <h2>✈ Łowca Lotów</h2>
+            <p class="subtitle">Śledzenie cen z polskich lotnisk • Ryanair farfnd <span class="tag-unofficial">NIEOFICJALNE</span> • Okazje Fly4free RSS</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-primary" onclick="showAddRouteModal()">+ Dodaj trasę</button>
+            <button class="btn btn-outline" onclick="refreshDeals()">🔄 Pobierz Fly4free</button>
+          </div>
+        </header>
+
+        <!-- Karta dodawania / formularz szybkiego wyboru -->
+        <div class="content-grid">
+          <div class="grid-main">
+            <!-- Aktywne trasy -->
+            <div class="card glass-panel">
+              <div class="card-header">
+                <h3>Monitorowane trasy</h3>
+                <span class="text-muted" id="routesCount">0 tras</span>
+              </div>
+              <div id="routesList" class="routes-container">
+                <div class="loading-state">Ładowanie tras...</div>
+              </div>
+            </div>
+
+            <!-- Wykres cen i historii -->
+            <div class="card glass-panel" id="chartCard" style="display:none;">
+              <div class="card-header">
+                <h3 id="chartTitle">Wykres cen</h3>
+                <span class="text-muted" id="chartSubtitle"></span>
+              </div>
+              <!-- Kontener na dynamiczny wykres SVG -->
+              <div class="chart-container" id="svgChartContainer"></div>
+              <!-- Słupki dni w miesiącu -->
+              <div class="bars-container" id="dayBarsContainer"></div>
+            </div>
+          </div>
+
+          <div class="grid-side">
+            <!-- Okazje z Fly4free -->
+            <div class="card glass-panel">
+              <div class="card-header">
+                <h3>🔥 Okazje z Fly4free.pl</h3>
+                <span class="badge" id="dealsCount">0</span>
+              </div>
+              <div class="deals-feed" id="dealsFeed">
+                <div class="loading-state">Ładowanie okazji...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- BOT 2: DZIENNY -->
+      <section class="bot-view" id="view-daily">
+        <header class="view-header glass-panel">
+          <div>
+            <h2>🛰 Dzienny Asystent</h2>
+            <p class="subtitle">Pamięć SQLite (12 wiadomości) • Open-Meteo • Kursy NBP • Wikipedia • Izolowane zadania</p>
+          </div>
+          <div class="header-actions">
+            <button class="btn btn-outline-danger" onclick="forgetMemory()">🧹 Zapomnij rozmowę</button>
+          </div>
+        </header>
+
+        <!-- Baner startu GPU jeśli trwa oczekiwanie -->
+        <div class="gpu-starting-banner glass-panel" id="gpuStartingBanner" style="display:none;">
+          <span class="spinner"></span> ⚙ Uruchamiam GPU na Vast.ai... (ok. 1–3 min)
+        </div>
+
+        <div class="chat-wrapper glass-panel">
+          <!-- Szybkie przyciski narzędzi -->
+          <div class="quick-tools-bar">
+            <span class="tools-label">Darmowe narzędzia:</span>
+            <button class="tool-chip" onclick="quickAsk('Jaka jest pogoda w Warszawie?')">🌤 Pogoda Warszawa</button>
+            <button class="tool-chip" onclick="quickAsk('Jaki jest kurs euro i dolara w NBP?')">💰 Kursy EUR / USD</button>
+            <button class="tool-chip" onclick="quickAsk('Wikipedia: Teleskop Jamesa Webba')">📖 Teleskop Webba</button>
+            <button class="tool-chip" onclick="quickAsk('Sprawdź stronę https://news.ycombinator.com')">🌐 Pobierz stronę</button>
+          </div>
+
+          <!-- Okno wiadomości czatu -->
+          <div class="chat-messages" id="chatMessages">
+            <div class="msg-bubble assistant">
+              <div class="msg-author">Dzienny</div>
+              <div class="msg-text">Cześć! Jestem Twoim asystentem. Pamiętam historię naszej rozmowy i korzystam z darmowych narzędzi Fazy 1 (Open-Meteo, NBP, Wikipedia, fetch). O co chciałbyś zapytać?</div>
+            </div>
+          </div>
+
+          <!-- Formularz wprowadzania wiadomości -->
+          <form class="chat-input-bar" onsubmit="sendChatMessage(event)">
+            <input type="text" id="chatInput" placeholder="Napisz wiadomość... (np. pogoda w Krakowie, kurs EUR, wiki: czarna dziura)" autocomplete="off">
+            <button type="submit" class="btn btn-cyan" id="btnSendChat">Wyślij ➤</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- BOT 3: WIDEO -->
+      <section class="bot-view" id="view-video">
+        <header class="view-header glass-panel">
+          <div>
+            <h2>🎬 Wideo Generator AI</h2>
+            <p class="subtitle">Faza 1: HF Lightricks LTX Distilled (darmowy Space) • Faza 2: Wan 2.1 1.3B (Vast GPU) • Łączenie FFmpeg</p>
+          </div>
+        </header>
+
+        <div class="content-grid">
+          <!-- Formularz generowania -->
+          <div class="card glass-panel">
+            <div class="card-header">
+              <h3>Nowe zadanie wideo</h3>
+              <span class="badge" id="videoModelBadge">Faza 1: HF LTX</span>
+            </div>
+            <form id="videoForm" onsubmit="submitVideoJob(event)">
+              <div class="form-group">
+                <label for="videoPrompt">Prompt wideo (opis sceny po angielsku dla najlepszych rezultatów):</label>
+                <textarea id="videoPrompt" rows="3" class="form-input" placeholder="np. A futuristic cyberpunk city with neon flying cars in rainy night, cinematic lighting..." required></textarea>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="videoModel">Model:</label>
+                  <select id="videoModel" class="form-input">
+                    <option value="hf_ltx">Lightricks LTX-Video Distilled (Darmowy HF Space)</option>
+                    <option value="wan2.1_1.3b">Wan 2.1 1.3B (Worker Vast.ai GPU)</option>
+                    <option value="ltx_diffusers">LTX-Video diffusers (Worker Vast.ai GPU)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="videoClips">Liczba klipów (1–6):</label>
+                  <input type="number" id="videoClips" class="form-input" min="1" max="6" value="1">
+                </div>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="videoAspect">Format obrazu:</label>
+                  <select id="videoAspect" class="form-input">
+                    <option value="16:9">16:9 (Panoramiczny)</option>
+                    <option value="9:16">9:16 (Pionowy TikTok/Reels)</option>
+                    <option value="1:1">1:1 (Kwadrat)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="videoSeed">Seed losowości:</label>
+                  <input type="number" id="videoSeed" class="form-input" value="42">
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-primary full-width" id="btnGenerateVideo">
+                🚀 Dodaj do kolejki wideo
+              </button>
+            </form>
+          </div>
+
+          <!-- Zadania wideo i podgląd -->
+          <div class="card glass-panel">
+            <div class="card-header">
+              <h3>Wygenerowane wideo i kolejka</h3>
+              <button class="btn btn-sm btn-outline" onclick="loadVideoJobs()">🔄 Odśwież</button>
+            </div>
+            <div class="video-jobs-list" id="videoJobsList">
+              <div class="loading-state">Ładowanie zadań...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- MODAL: Dodaj trasę lotu -->
+  <div class="modal" id="addRouteModal">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <h3>Dodaj nową trasę lotniczą</h3>
+        <button class="close-btn" onclick="closeModal('addRouteModal')">&times;</button>
+      </div>
+      <form onsubmit="submitNewRoute(event)">
+        <div class="form-group">
+          <label>Lotnisko wylotu (Polska):</label>
+          <select id="newRouteOrigin" class="form-input" required>
+            <option value="WMI">WMI — Warszawa Modlin</option>
+            <option value="WAW">WAW — Warszawa Chopin</option>
+            <option value="KRK">KRK — Kraków Balice</option>
+            <option value="GDN">GDN — Gdańsk Rębiechowo</option>
+            <option value="KTW">KTW — Katowice Pyrzowice</option>
+            <option value="WRO">WRO — Wrocław Strachowice</option>
+            <option value="POZ">POZ — Poznań Ławica</option>
+            <option value="RZE">RZE — Rzeszów Jasionka</option>
+            <option value="LUZ">LUZ — Lublin</option>
+            <option value="SZZ">SZZ — Szczecin Goleniów</option>
+            <option value="BZG">BZG — Bydgoszcz Szwederowo</option>
+            <option value="LCJ">LCJ — Łódź Lublinek</option>
+            <option value="RDO">RDO — Radom Sadków</option>
+            <option value="SZY">SZY — Olsztyn Mazury</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Lotnisko docelowe (kod IATA, np. BCN, FCO, ALC, AGP):</label>
+          <input type="text" id="newRouteDest" class="form-input" placeholder="BCN" maxlength="3" required style="text-transform: uppercase;">
+        </div>
+        <div class="form-group">
+          <label>Miesiąc (YYYY-MM):</label>
+          <input type="month" id="newRouteMonth" class="form-input" value="2026-12" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Próg ceny PLN (alert gdy ≤):</label>
+            <input type="number" id="newRouteThreshold" class="form-input" placeholder="np. 150">
+          </div>
+          <div class="form-group">
+            <label>Spadek % (alert gdy ≥):</label>
+            <input type="number" id="newRouteDrop" class="form-input" placeholder="np. 15">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" onclick="closeModal('addRouteModal')">Anuluj</button>
+          <button type="submit" class="btn btn-primary">Zapisz i sprawdź ceny</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Potwierdzenie startu Vast GPU -->
+  <div class="modal" id="confirmVastModal">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <h3>Potwierdzenie uruchomienia GPU</h3>
+        <button class="close-btn" onclick="closeModal('confirmVastModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Czy na pewno chcesz ręcznie uruchomić instancję GPU Vast.ai RTX 3090?</p>
+        <p class="text-muted">Szacowany koszt: <strong>~0,12 $/h</strong>. Instancja zostanie automatycznie zatrzymana po 10 minutach bezczynności.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" onclick="closeModal('confirmVastModal')">Anuluj</button>
+        <button type="button" class="btn btn-cyan" onclick="startVastConfirmed()">Tak, uruchom GPU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Alerty -->
+  <div class="modal" id="alertsModal">
+    <div class="modal-content glass-panel modal-lg">
+      <div class="modal-header">
+        <h3>🔔 Ostatnie alerty</h3>
+        <button class="btn btn-sm btn-outline" onclick="markAllAlertsRead()">Oznacz jako przeczytane</button>
+        <button class="close-btn" onclick="closeModal('alertsModal')">&times;</button>
+      </div>
+      <div class="modal-body" id="alertsListContainer">
+        <div class="loading-state">Ładowanie alertów...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Sejf kluczy (Fernet) -->
+  <div class="modal" id="vaultModal">
+    <div class="modal-content glass-panel">
+      <div class="modal-header">
+        <h3>🔐 Sejf danych dostępowych (Fernet)</h3>
+        <button class="close-btn" onclick="closeModal('vaultModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted">Klucz szyfrujący przechowywany poza repozytorium (<code>~/.orbit/vault.key</code>). Zgodnie z zasadami bezpieczeństwa wartości kluczy nigdy nie są zwracane do UI ani logowane.</p>
+        <div class="vault-entries-box">
+          <h4>Zapisane pozycje w sejfie:</h4>
+          <ul id="vaultNamesList" class="vault-list"></ul>
+        </div>
+        <hr class="separator">
+        <h4>Dodaj lub zaktualizuj wpis:</h4>
+        <form onsubmit="saveVaultSecret(event)">
+          <div class="form-group">
+            <label>Nazwa wpisu (np. vast, worker, travelpayouts, reddit):</label>
+            <input type="text" id="vaultSecretName" class="form-input" required placeholder="vast">
+          </div>
+          <div class="form-group">
+            <label>Wartość JSON danych (np. {"api_key":"..."}):</label>
+            <textarea id="vaultSecretData" class="form-input" rows="3" required placeholder='{"api_key": "twoj-klucz-api"}'></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary full-width">Zaszyfruj i zapisz w sejfie</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Kolejka zadań -->
+  <div class="modal" id="jobsModal">
+    <div class="modal-content glass-panel modal-lg">
+      <div class="modal-header">
+        <h3>📋 Zadania i harmonogram</h3>
+        <button class="close-btn" onclick="closeModal('jobsModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <h4>Aktywne zadania okresowe (Scheduler):</h4>
+        <div id="schedJobsList" class="table-responsive"></div>
+        <h4 style="margin-top:20px;">Dziennik wykonania (jobs_log):</h4>
+        <div id="jobsLogList" class="table-responsive"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

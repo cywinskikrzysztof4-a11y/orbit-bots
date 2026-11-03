@@ -1,0 +1,12 @@
+.venv/
+data/
+__pycache__/
+*.key
+*.db
+*.sqlite
+.env
+*.pem
+.orbit/
+vault*.json
+.pytest_cache/
+*.pyc

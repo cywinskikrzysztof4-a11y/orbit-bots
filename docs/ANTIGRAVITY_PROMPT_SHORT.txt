@@ -1,0 +1,22 @@
+Zbuduj w /workspace/orbit aplikację „Orbit Bots” (Python 3.11, FastAPI + SQLite, UI po polsku, port 5003) z 3 botami. Docelowo działa na Vast.ai RTX 3090 24 GB. Pełna specyfikacja: docs/ANTIGRAVITY_PROMPT.md.
+
+BOTY:
+1. Łowca lotów: trasy z polskich lotnisk. Ceny z Ryanair farfnd (etykieta „NIEOFICJALNE”, zapytania co 6 h), okazje z RSS https://www.fly4free.pl/feed/. Historia cen z wykresem, alerty: próg i spadek o X%.
+2. Dzienny: czat z pamięcią (SQLite) i cache TTL. Każde zadanie ma izolowany katalog. Narzędzia: fetch + BeautifulSoup.
+3. Wideo: prompt, kolejka, klipy, sklejanie w FFmpeg, pobieranie MP4.
+
+RDZEŃ: rejestr botów (BotBase), kolejka zadań, scheduler, alerty, sejf Fernet (klucz poza repo). Kontroler Vast.ai przez oficjalne API: start/stop istniejącej instancji, auto-stop po N min bezczynności, nigdy create/destroy. Architektura dzielona: panel zawsze włączony + worker GPU.
+
+WYGLĄD: ciemny motyw kosmiczny, karty glass, animowane awatary SVG/CSS bez zewnętrznych plików: powiewająca flaga Chin (loty), satelita na orbicie (dzienny), kometa z taśmą filmową (wideo).
+
+FAZA 1 (darmowo, bez wydatków):
+- loty: Ryanair farfnd + Fly4free RSS
+- dzienny: darmowe API bez klucza (Open-Meteo, NBP, Wikipedia), opcjonalnie darmowy Gemini (klucz z pliku GEMINI_KEY_FILE, nigdy nie logować)
+- wideo: darmowy Space HF Lightricks/ltx-video-distilled przez gradio_client (wzór: /workspace/video-studio/providers/hf_ltx.py)
+Uruchom realne testy każdego bota i zapisz docs/TEST_RESULTS.md (wejście, przykładowy wynik, PASS/FAIL).
+
+FAZA 2 (dopiero po zaliczeniu Fazy 1): Dolphin dolphin3:8b przez Ollama (API zgodne z OpenAI, OPENAI_BASE_URL) i lokalne wideo (Wan 2.1 1.3B / LTX przez diffusers) na workerze Vast. Lock GPU: przed wideo zwolnij Ollamę (keep_alive=0). Wszystko za flagami ORBIT_USE_OLLAMA=0 i ORBIT_USE_LOCAL_VIDEO=0. Worker: Dockerfile + onstart.sh. Kontroler Vast testuj na mocku.
+
+ZASADY: nie wydawaj pieniędzy, nie uruchamiaj instancji Vast, nie wpisuj sekretów do kodu (env lub sejf), nie loguj się na konta użytkownika bez zgody, nie obchodź zabezpieczeń stron. Nie ruszaj portów 5000–5002. Brak klucza = status „brak klucza”.
+
+DOKUMENTY: README.md, ARCHITECTURE.md, docs/TEST_RESULTS.md, docs/DEPLOY_VAST.md (zaktualizuj istniejący).
