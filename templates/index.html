@@ -58,7 +58,7 @@
 
       <!-- Lista botów z animowanymi awatarami -->
       <nav class="bot-nav">
-        <div class="nav-section-title">DOSTĘPNE BOTY</div>
+        <div class="nav-section-title">AGENCI I BOTY</div>
 
         <!-- Bot 1: Łowca lotów -->
         <div class="bot-nav-item active" data-bot="flights" onclick="switchBot('flights')">
@@ -120,7 +120,7 @@
           </div>
           <div class="bot-info">
             <div class="bot-name">Dzienny</div>
-            <div class="bot-desc">Pamięć, Open-Meteo, NBP & Wiki</div>
+            <div class="bot-desc">Pamięć, Open-Meteo, NBP, Wiki & Gmail</div>
           </div>
           <div class="badge-counter" id="badge-daily">0</div>
         </div>
@@ -137,11 +137,9 @@
                   <stop offset="100%" stop-color="#070b1a" stop-opacity="0.1"/>
                 </linearGradient>
               </defs>
-              <!-- Ogon taśmy filmowej -->
               <path d="M72,28 C56,40 40,38 26,56 C16,70 8,82 4,88" fill="none" stroke="url(#cometGrad)" stroke-width="12" stroke-linecap="round"/>
               <path d="M70,24 C54,36 38,34 24,52 C14,66 6,78 3,84" fill="none" stroke="#070b1a" stroke-width="1.8" stroke-dasharray="2,3"/>
               <path d="M74,32 C58,44 42,42 28,60 C18,74 10,86 5,92" fill="none" stroke="#070b1a" stroke-width="1.8" stroke-dasharray="2,3"/>
-              <!-- Szpula filmowa obracająca się -->
               <g class="comet-reel-group" transform="translate(72, 28)">
                 <circle cx="0" cy="0" r="14" fill="#1e1b4b" stroke="#7c5cff" stroke-width="2.5"/>
                 <circle cx="0" cy="0" r="11" fill="#312e81" stroke="#22d3ee" stroke-width="1"/>
@@ -160,6 +158,25 @@
             <div class="bot-desc">AI Generator (HF & Wan 2.1)</div>
           </div>
           <div class="badge-counter" id="badge-video">0</div>
+        </div>
+
+        <!-- 4. Zakładka Konta -->
+        <div class="bot-nav-item" data-bot="accounts" onclick="switchBot('accounts')">
+          <div class="avatar-container">
+            <svg class="avatar-svg" viewBox="0 0 100 100">
+              <circle cx="50" cy="38" r="18" fill="none" stroke="#22d3ee" stroke-width="3"/>
+              <circle cx="50" cy="38" r="9" fill="#7c5cff"/>
+              <path d="M22,82 C22,64 34,56 50,56 C66,56 78,64 78,82" fill="none" stroke="#22d3ee" stroke-width="3"/>
+              <circle cx="74" cy="26" r="8" fill="#10b981"/>
+              <path d="M70,26 L73,29 L78,23" fill="none" stroke="#fff" stroke-width="2"/>
+            </svg>
+            <span class="status-dot dot-green" id="dot-accounts" title="Konta"></span>
+          </div>
+          <div class="bot-info">
+            <div class="bot-name">Konta & Zgody</div>
+            <div class="bot-desc">Gmail, sesje, kolejka akcji</div>
+          </div>
+          <div class="badge-counter" id="badge-accounts">0</div>
         </div>
       </nav>
 
@@ -183,8 +200,8 @@
       <section class="bot-view active" id="view-flights">
         <header class="view-header glass-panel">
           <div>
-            <h2>✈ Łowca Lotów</h2>
-            <p class="subtitle">Śledzenie cen z polskich lotnisk • Ryanair farfnd <span class="tag-unofficial">NIEOFICJALNE</span> • Okazje Fly4free RSS</p>
+            <h2>✈ Łowca Lotów (Agent Podróżniczy)</h2>
+            <p class="subtitle">Śledzenie cen z polskich lotnisk • Ryanair farfnd <span class="tag-unofficial">NIEOFICJALNE</span> • Okazje Fly4free RSS • Agent z narzędziami</p>
           </div>
           <div class="header-actions">
             <button class="btn btn-primary" onclick="showAddRouteModal()">+ Dodaj trasę</button>
@@ -192,7 +209,24 @@
           </div>
         </header>
 
-        <!-- Karta dodawania / formularz szybkiego wyboru -->
+        <!-- Karta czatu z agentem lotniczym -->
+        <div class="card glass-panel" style="margin-bottom: 16px;">
+          <div class="card-header">
+            <h3>🤖 Czat z Agentem Łowcy Lotów (Function-Calling)</h3>
+            <span class="badge">gemini-3.5-flash-lite</span>
+          </div>
+          <div class="chat-messages" id="flightChatMessages" style="max-height: 220px; overflow-y:auto;">
+            <div class="msg-bubble assistant">
+              <div class="msg-author">Łowca Lotów</div>
+              <div class="msg-text">Cześć! Jestem agentem podróżniczym z narzędziami wyszukiwania lotów (Ryanair farfnd), okazji (Fly4free) oraz dodawania i usuwania alertów cenowych. O co chcesz zapytać?</div>
+            </div>
+          </div>
+          <form class="chat-input-bar" onsubmit="sendFlightChatMessage(event)">
+            <input type="text" id="flightChatInput" placeholder="Zapytaj agenta (np. 'Wyszukaj loty z Modlina do Barcelony na grudzień 2026 i ustaw alert')..." autocomplete="off">
+            <button type="submit" class="btn btn-cyan" id="btnSendFlightChat">Wyślij ➤</button>
+          </form>
+        </div>
+
         <div class="content-grid">
           <div class="grid-main">
             <!-- Aktywne trasy -->
@@ -212,9 +246,7 @@
                 <h3 id="chartTitle">Wykres cen</h3>
                 <span class="text-muted" id="chartSubtitle"></span>
               </div>
-              <!-- Kontener na dynamiczny wykres SVG -->
               <div class="chart-container" id="svgChartContainer"></div>
-              <!-- Słupki dni w miesiącu -->
               <div class="bars-container" id="dayBarsContainer"></div>
             </div>
           </div>
@@ -238,15 +270,14 @@
       <section class="bot-view" id="view-daily">
         <header class="view-header glass-panel">
           <div>
-            <h2>🛰 Dzienny Asystent</h2>
-            <p class="subtitle">Pamięć SQLite (12 wiadomości) • Open-Meteo • Kursy NBP • Wikipedia • Izolowane zadania</p>
+            <h2>🛰 Dzienny Asystent (Agent Gemini)</h2>
+            <p class="subtitle">Pamięć SQLite • Open-Meteo • Kursy NBP • Wikipedia • Web Fetch • Gmail (Tylko Odczyt)</p>
           </div>
           <div class="header-actions">
             <button class="btn btn-outline-danger" onclick="forgetMemory()">🧹 Zapomnij rozmowę</button>
           </div>
         </header>
 
-        <!-- Baner startu GPU jeśli trwa oczekiwanie -->
         <div class="gpu-starting-banner glass-panel" id="gpuStartingBanner" style="display:none;">
           <span class="spinner"></span> ⚙ Uruchamiam GPU na Vast.ai... (ok. 1–3 min)
         </div>
@@ -259,19 +290,20 @@
             <button class="tool-chip" onclick="quickAsk('Jaki jest kurs euro i dolara w NBP?')">💰 Kursy EUR / USD</button>
             <button class="tool-chip" onclick="quickAsk('Wikipedia: Teleskop Jamesa Webba')">📖 Teleskop Webba</button>
             <button class="tool-chip" onclick="quickAsk('Sprawdź stronę https://news.ycombinator.com')">🌐 Pobierz stronę</button>
+            <button class="tool-chip" onclick="quickAsk('Podsumuj moje wiadomości w skrzynce Gmail')">📬 Gmail: podsumuj skrzynkę</button>
           </div>
 
-          <!-- Okno wiadomości czatu -->
+          <!-- Okno wiadomości czatu z krokami agenta -->
           <div class="chat-messages" id="chatMessages">
             <div class="msg-bubble assistant">
               <div class="msg-author">Dzienny</div>
-              <div class="msg-text">Cześć! Jestem Twoim asystentem. Pamiętam historię naszej rozmowy i korzystam z darmowych narzędzi Fazy 1 (Open-Meteo, NBP, Wikipedia, fetch). O co chciałbyś zapytać?</div>
+              <div class="msg-text">Cześć! Jestem Twoim autonomicznym asystentem. Posiadam narzędzia do sprawdzania pogody, kursów walut NBP, przeszukiwania Wikipedii, pobierania stron WWW oraz bezpiecznego odczytu Twojej poczty Gmail (wyłącznie w trybie tylko do odczytu). O co chciałbyś zapytać?</div>
             </div>
           </div>
 
           <!-- Formularz wprowadzania wiadomości -->
           <form class="chat-input-bar" onsubmit="sendChatMessage(event)">
-            <input type="text" id="chatInput" placeholder="Napisz wiadomość... (np. pogoda w Krakowie, kurs EUR, wiki: czarna dziura)" autocomplete="off">
+            <input type="text" id="chatInput" placeholder="Napisz wiadomość... (np. 'pogoda w Krakowie', 'kurs euro', 'podsumuj maile w Gmailu')" autocomplete="off">
             <button type="submit" class="btn btn-cyan" id="btnSendChat">Wyślij ➤</button>
           </form>
         </div>
@@ -281,10 +313,28 @@
       <section class="bot-view" id="view-video">
         <header class="view-header glass-panel">
           <div>
-            <h2>🎬 Wideo Generator AI</h2>
-            <p class="subtitle">Faza 1: HF Lightricks LTX Distilled (darmowy Space) • Faza 2: Wan 2.1 1.3B (Vast GPU) • Łączenie FFmpeg</p>
+            <h2>🎬 Wideo Generator AI (Agent Wideo)</h2>
+            <p class="subtitle">Faza 1: HF Lightricks LTX Distilled (darmowy Space) • Faza 2: Wan 2.1 1.3B (Vast GPU) • Narzędzia ltx_enqueue & ltx_status</p>
           </div>
         </header>
+
+        <!-- Karta czatu z agentem wideo -->
+        <div class="card glass-panel" style="margin-bottom: 16px;">
+          <div class="card-header">
+            <h3>🤖 Czat z Agentem Wideo (Function-Calling)</h3>
+            <span class="badge">gemini-3.5-flash-lite</span>
+          </div>
+          <div class="chat-messages" id="videoChatMessages" style="max-height: 200px; overflow-y:auto;">
+            <div class="msg-bubble assistant">
+              <div class="msg-author">Agent Wideo</div>
+              <div class="msg-text">Cześć! Jestem agentem wideo. Mogę zakolejkować dla Ciebie nowe zadanie generowania wideo z dopracowanym promptem (ltx_enqueue) lub sprawdzić status gotowych filmów (ltx_status). Napisz mi, co chcesz stworzyć!</div>
+            </div>
+          </div>
+          <form class="chat-input-bar" onsubmit="sendVideoChatMessage(event)">
+            <input type="text" id="videoChatInput" placeholder="Zapytaj agenta wideo (np. 'Stwórz wideo cyberpunkowej metropolii nocą i powiedz jaki ma numer zadania')..." autocomplete="off">
+            <button type="submit" class="btn btn-cyan" id="btnSendVideoChat">Wyślij ➤</button>
+          </form>
+        </div>
 
         <div class="content-grid">
           <!-- Formularz generowania -->
@@ -343,6 +393,104 @@
             </div>
             <div class="video-jobs-list" id="videoJobsList">
               <div class="loading-state">Ładowanie zadań...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- WIDOK 4: STRONA KONTA (Wymóg 4) -->
+      <section class="bot-view" id="view-accounts">
+        <header class="view-header glass-panel">
+          <div>
+            <h2>🔑 Zarządzanie Kontami & Zgody (core/accounts.py)</h2>
+            <p class="subtitle">OAuth 2.0 (Gmail readonly) • Szyfrowane dane w sejfie Fernet • Flaga zgody per konto • Kolejka do zatwierdzenia</p>
+          </div>
+          <div class="header-actions">
+            <a href="/auth/google/start" class="btn btn-primary" id="btnConnectGoogle">
+              ➕ Połącz Gmail (OAuth 2.0)
+            </a>
+            <button class="btn btn-outline" onclick="loadAccountsData()">🔄 Odśwież</button>
+          </div>
+        </header>
+
+        <div class="accounts-grid">
+          <div class="grid-main">
+            <!-- Podłączone konta -->
+            <div class="card glass-panel">
+              <div class="card-header">
+                <h3>Podłączone konta</h3>
+                <span class="badge" id="accountsCount">0 kont</span>
+              </div>
+              <div id="accountsListContainer">
+                <div class="loading-state">Ładowanie kont...</div>
+              </div>
+            </div>
+
+            <!-- Kolejka do zatwierdzenia -->
+            <div class="card glass-panel">
+              <div class="card-header">
+                <h3>🛡️ Kolejka do zatwierdzenia (akcje agentów)</h3>
+                <span class="badge" id="pendingActionsCount">0</span>
+              </div>
+              <p class="text-muted" style="font-size:0.8rem; margin-bottom:12px;">
+                Każda próba wysłania, zakupu lub publikacji przez agenta jest wstrzymywana i wymaga Twojego zatwierdzenia.
+              </p>
+              <div id="pendingActionsList">
+                <div class="text-muted" style="text-align:center; padding:15px;">Brak oczekujących akcji do zatwierdzenia.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid-side">
+            <!-- Oczekujące 2FA -->
+            <div class="card glass-panel">
+              <div class="card-header">
+                <h3>🔐 Uwierzytelnienie dwuskładnikowe (2FA)</h3>
+                <span class="badge" id="pending2FACount">0</span>
+              </div>
+              <p class="text-muted" style="font-size:0.8rem; margin-bottom:12px;">
+                Zakaz obchodzenia zabezpieczeń: gdy serwis zażąda kodu 2FA/CAPTCHA, agent pauzuje i czeka na Twój kod.
+              </p>
+              <div id="pending2FAList">
+                <div class="text-muted" style="text-align:center; padding:15px;">Brak oczekujących żądań 2FA.</div>
+              </div>
+            </div>
+
+            <!-- Dodaj konto serwisowe (bez OAuth) -->
+            <div class="card glass-panel">
+              <div class="card-header">
+                <h3>Dodaj konto serwisowe (Login/Hasło)</h3>
+              </div>
+              <p class="text-muted" style="font-size:0.8rem; margin-bottom:12px;">
+                Dla serwisów bez OAuth hasło jest szyfrowane w sejfie Fernet. Zgoda jest wymagana, by agent mógł z niego korzystać.
+              </p>
+              <form onsubmit="submitCredentialsAccount(event)">
+                <div class="form-group">
+                  <label>Identyfikator (np. ryanair, booking, skyscanner):</label>
+                  <input type="text" id="accId" class="form-input" placeholder="ryanair" required>
+                </div>
+                <div class="form-group">
+                  <label>Nazwa konta (opis):</label>
+                  <input type="text" id="accName" class="form-input" placeholder="Moje konto Ryanair" required>
+                </div>
+                <div class="form-group">
+                  <label>Serwis:</label>
+                  <input type="text" id="accService" class="form-input" placeholder="ryanair" required>
+                </div>
+                <div class="form-group">
+                  <label>Login / E-mail:</label>
+                  <input type="text" id="accUsername" class="form-input" placeholder="uzytkownik@domena.pl" required>
+                </div>
+                <div class="form-group">
+                  <label>Hasło (zostanie zaszyfrowane):</label>
+                  <input type="password" id="accPassword" class="form-input" placeholder="••••••••" required>
+                </div>
+                <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+                  <input type="checkbox" id="accConsent" checked>
+                  <label for="accConsent" style="margin:0; font-size:0.85rem;">Udziel zgody na użycie przez agenta</label>
+                </div>
+                <button type="submit" class="btn btn-primary full-width">+ Zapisz w sejfie i dodaj konto</button>
+              </form>
             </div>
           </div>
         </div>
