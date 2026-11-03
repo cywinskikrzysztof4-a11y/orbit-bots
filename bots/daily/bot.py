@@ -1,13 +1,15 @@
-"""Bot Dzienny — czat po polsku z pamięcią rozmów (SQLite), cache HTTP z TTL,
-izolowanym katalogiem na każde zadanie (z walidacją realpath) oraz darmowymi narzędziami Fazy 1
-(Open-Meteo, NBP, Wikipedia, fetch+BeautifulSoup) i opcjonalnym Gemini / Dolphin Ollama.
+"""Bot Dzienny — inteligentny asystent Orbit z pamięcią rozmów (SQLite),
+darmowymi narzędziami Fazy 1 (Open-Meteo, NBP, Wikipedia, fetch) oraz narzędziami poczty Gmail (tylko odczyt).
+Wspiera autonomicznego agenta Gemini z pętlą function-calling (core.agent.Agent).
 """
 import os, json, re, time, uuid, hashlib, shutil, requests
 from urllib.parse import urlparse, quote
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from core import db, config, gemini, llm, alerts
+from core import db, config, gemini, llm, alerts, gmail
+from core.browser import BROWSER_TOOLS
+from core.agent import Agent, Tool, AgentResult
 from core.registry import BotBase, register
 
 TASKS_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "tasks"))
@@ -50,7 +52,6 @@ class TaskSandbox:
         """Ścieżki typu '../../x' lub próby wyjścia z katalogu zadania są bezwzględnie odrzucane."""
         if not filename or filename.strip() == "":
             raise ValueError("Pusta nazwa pliku")
-        # Wykryj próbę directory traversal
         parts = re.split(r"[/\\]", filename)
         if ".." in parts or any(p == ".." for p in parts):
             raise ValueError(f"Niedozwolona próba wyjścia z katalogu zadania (path traversal): {filename}")
@@ -76,7 +77,7 @@ class TaskSandbox:
 
 # Narzędzia bez klucza
 def fetch_url(url: str, sandbox: TaskSandbox = None, ttl: float = 3600) -> str:
-    """Pobiera zawartość strony WWW z usunięciem skryptów i styli (requests + BeautifulSoup)."""
+    """Pobiera zawartość strony WWW z usunięciem skryptów i styli (requests + BeautifulSoup). Tylko GET, limit rozmiaru."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"Dozwolone tylko http/https: {url}")
@@ -199,7 +200,6 @@ def get_wikipedia(query: str, lang: str = "pl") -> dict:
     if hit:
         return json.loads(hit)
 
-    # Najpierw spróbuj REST API summary
     sum_url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{quote(query)}"
     try:
         r = requests.get(sum_url, headers=UA, timeout=15)
@@ -216,7 +216,6 @@ def get_wikipedia(query: str, lang: str = "pl") -> dict:
     except Exception:
         pass
 
-    # Wyszukiwanie OpenSearch / API search
     search_url = f"https://{lang}.wikipedia.org/w/api.php"
     r = requests.get(search_url, params={"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 3}, headers=UA, timeout=15)
     r.raise_for_status()
@@ -238,6 +237,135 @@ def get_wikipedia(query: str, lang: str = "pl") -> dict:
     cache_put(ckey, json.dumps(res, ensure_ascii=False), ttl=86400)
     return res
 
+# ----------------- REJESTR NARZĘDZI DLA AGENTA DZIENNEGO -----------------
+
+DAILY_TOOLS = [
+    Tool(
+        name="weather",
+        description="Pobiera aktualną prognozę pogody dla podanego miasta (Open-Meteo, darmowe bez klucza).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "Nazwa miasta, np. Warszawa, Kraków, Berlin"}
+            },
+            "required": ["city"]
+        },
+        handler=get_weather,
+        summary_fn=lambda r: f"{r.get('city')}: {r.get('temperature')}°C, {r.get('condition')}"
+    ),
+    Tool(
+        name="nbp_rates",
+        description="Pobiera oficjalny średni kurs waluty z Narodowego Banku Polskiego (NBP API).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "currency": {"type": "string", "description": "Kod waluty ISO, np. EUR, USD, GBP, CHF"}
+            },
+            "required": ["currency"]
+        },
+        handler=lambda currency="EUR": get_nbp_rate(currency),
+        summary_fn=lambda r: f"1 {r.get('code')} = {r.get('mid')} PLN ({r.get('effectiveDate')})"
+    ),
+    Tool(
+        name="wikipedia",
+        description="Wyszukuje hasło i pobiera streszczenie z Wikipedii.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Szukane hasło lub postać, np. Księżyc, Albert Einstein"},
+                "lang": {"type": "string", "description": "Kod języka, domyślnie 'pl'", "default": "pl"}
+            },
+            "required": ["query"]
+        },
+        handler=lambda query, lang="pl": get_wikipedia(query, lang),
+        summary_fn=lambda r: f"Wikipedia: '{r.get('title')}' (znaleziono artykuł)"
+    ),
+    Tool(
+        name="web_fetch",
+        description="Pobiera treść strony WWW (tylko protokoły HTTP/HTTPS, metoda GET, limit rozmiaru, bez skryptów/styli).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Pełny adres URL strony internetowej (musi zaczynać się od http:// lub https://)"}
+            },
+            "required": ["url"]
+        },
+        handler=lambda url: fetch_url(url)[:25000],
+        summary_fn=lambda r: f"Pobrano stronę WWW ({len(r)} znaków)"
+    ),
+    # Narzędzia Gmail (tylko odczyt)
+    Tool(
+        name="list_recent_emails",
+        description="Pobiera listę ostatnich wiadomości z podłączonej skrzynki pocztowej Gmail (tylko odczyt).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "max_results": {"type": "integer", "description": "Maksymalna liczba wiadomości do pobrania (1-15, domyślnie 5)", "default": 5}
+            }
+        },
+        handler=lambda max_results=5: gmail.list_recent_emails(max_results),
+        summary_fn=lambda r: f"Pobrano {len(r)} ostatnich wiadomości z Gmaila"
+    ),
+    Tool(
+        name="search_emails",
+        description="Wyszukuje wiadomości w poczcie Gmail według zapytania tekstowego (np. 'from:jan', 'lot', 'faktura').",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Zapytanie wyszukiwania Gmail"},
+                "max_results": {"type": "integer", "description": "Limit wyników (1-15)", "default": 5}
+            },
+            "required": ["query"]
+        },
+        handler=lambda query, max_results=5: gmail.search_emails(query, max_results),
+        summary_fn=lambda r: f"Znaleziono {len(r)} wiadomości dla zapytania"
+    ),
+    Tool(
+        name="read_email",
+        description="Odczytuje pełną treść konkretnej wiadomości e-mail na podstawie jej message_id.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string", "description": "Identyfikator wiadomości w Gmail"}
+            },
+            "required": ["message_id"]
+        },
+        handler=lambda message_id: gmail.read_email(message_id),
+        summary_fn=lambda r: f"Odczytano wiadomość od {r.get('from')}: '{r.get('subject')}'"
+    ),
+    Tool(
+        name="summarize_inbox",
+        description="Przygotowuje zwięzłe podsumowanie ostatnich wiadomości ze skrzynki odbiorczej Gmail.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "max_results": {"type": "integer", "description": "Liczba wiadomości do podsumowania", "default": 5}
+            }
+        },
+        handler=lambda max_results=5: gmail.summarize_inbox(max_results),
+        summary_fn=lambda r: "Wygenerowano podsumowanie skrzynki odbiorczej Gmail"
+    )
+] + BROWSER_TOOLS
+
+def get_daily_agent() -> Agent:
+    """Tworzy instancję Agenta Codziennego z zarejestrowanymi narzędziami."""
+    return Agent(
+        name="daily",
+        system_prompt=(
+            "Jesteś Dzienny — inteligentny asystent personalny w centrum dowodzenia Orbit Bots. "
+            "Odpowiadasz zawsze w języku polskim, zwięźle, konkretnie i uprzejmie. "
+            "Posiadasz zestaw darmowych narzędzi Fazy 1: pogoda (Open-Meteo), kursy walut (NBP), Wikipedia, pobieranie stron WWW (web_fetch), "
+            "dostęp do skrzynki Gmail w trybie TYLKO DO ODCZYTU (bez możliwości wysyłania/usuwania) "
+            "oraz narzędzia przeglądarki internetowej headless Chromium (browser_navigate, browser_click, browser_fill, browser_register_account) "
+            "do otwierania stron, rejestracji kont, przeglądania sklepów i przechodzenia do kasy. "
+            "PRZESTROGA: Przed kliknięciem ostatecznego przycisku 'Zapłać' / 'Złóż zamówienie' masz bezwzględny obowiązek zatrzymać się "
+            "i przedstawić podsumowanie (sklep, kwota, pozycje) w panelu z prośbą o zatwierdzenie. Bez zatwierdzenia przez użytkownika płatność jest zablokowana. "
+            "Nigdy nie loguj ani nie zapisuj w tekście danych kart płatniczych. W przypadku napotkania CAPTCHA lub kodu 2FA/SMS wstrzymaj działanie i poproś o kod."
+        ),
+        tools=DAILY_TOOLS,
+        max_steps=6
+    )
+
 class ChatRequest(BaseModel):
     session: str = "default"
     message: str
@@ -249,13 +377,13 @@ class DailyBot(BotBase):
     description = "Asystent codzienny: czat z pamięcią, pogoda (Open-Meteo), kursy NBP, Wikipedia i narzędzia webowe."
 
     def status(self):
-        gemini_ok = gemini.available()
+        gemini_ok = bool(os.environ.get("LLM_API_KEY")) or gemini.available()
         ollama_ok = config.PHASE2_OLLAMA
         return {
-            "mode": "ollama (faza 2)" if ollama_ok else ("gemini" if gemini_ok else "darmowy (bez klucza: Open-Meteo, NBP, Wiki)"),
+            "mode": "agent (gemini-3.5-flash-lite)" if os.environ.get("LLM_API_KEY") else ("ollama" if ollama_ok else "darmowy dyspozytor narzędzi"),
             "memory_entries": len(db.query("SELECT id FROM daily_memory")),
             "cache_entries": len(db.query("SELECT key FROM daily_cache WHERE expires > ?", (time.time(),))),
-            "tools": ["Open-Meteo (pogoda)", "NBP (kursy walut)", "Wikipedia REST", "fetch (BeautifulSoup)"]
+            "tools": ["Open-Meteo", "NBP", "Wikipedia", "web_fetch", "Gmail (readonly)", "Chromium Browser"]
         }
 
     def run(self, session: str, msg: str) -> dict:
@@ -271,7 +399,27 @@ class DailyBot(BotBase):
 
         db.execute("INSERT INTO daily_memory(session, role, content) VALUES(?, 'user', ?)", (session, msg))
 
-        # 2. Czy Faza 2 z Ollama?
+        # 2. Główna ścieżka Agenta (jeśli jest LLM_API_KEY)
+        if os.environ.get("LLM_API_KEY"):
+            try:
+                agent = get_daily_agent()
+                agent_res = agent.run(msg, history=mem)
+                answer = agent_res.answer
+                db.execute("INSERT INTO daily_memory(session, role, content) VALUES(?, 'assistant', ?)", (session, answer))
+                sandbox.write("answer.md", answer)
+                return {
+                    "answer": answer,
+                    "steps": agent_res.steps,
+                    "paused": agent_res.paused,
+                    "pause_reason": agent_res.pause_reason,
+                    "pending_action": agent_res.pending_action,
+                    "pending_2fa": agent_res.pending_2fa,
+                    "task": tid
+                }
+            except Exception as e:
+                alerts.notify(self.id, "Błąd Agenta Gemini", str(e)[:200])
+
+        # 3. Jeśli Faza 2 z Ollama
         if config.PHASE2_OLLAMA:
             try:
                 system_prompt = "Jesteś Dzienny, inteligentny asystent Orbit Bots. Odpowiadasz zwięźle i pomocnie po polsku."
@@ -280,76 +428,26 @@ class DailyBot(BotBase):
                 answer = llm.chat(messages, system=system_prompt)
                 db.execute("INSERT INTO daily_memory(session, role, content) VALUES(?, 'assistant', ?)", (session, answer))
                 sandbox.write("answer.md", answer)
-                return {"answer": answer, "trace": [{"action": "ollama_dolphin", "status": "ok"}], "task": tid}
+                return {"answer": answer, "steps": [{"tool": "ollama", "result_summary": "Odpowiedź modelu lokalnego"}], "task": tid}
             except Exception as e:
-                # Jeśli worker nie działa lub błąd połączenia
                 alerts.notify(self.id, "Błąd Ollama / Dolphin", str(e)[:200])
-                # przejdź do trybu awaryjnego
 
-        # 3. Czy mamy klucz Gemini?
-        if gemini.available():
-            try:
-                system_prompt = (
-                    "Jesteś Dzienny, asystent zadań webowych aplikacji Orbit Bots. Odpowiadasz po polsku.\n"
-                    "Dostępne narzędzia (zwróć JSON jeśli chcesz użyć narzędzia):\n"
-                    "{\"action\":\"weather\",\"city\":\"...\"}\n"
-                    "{\"action\":\"nbp\",\"currency\":\"EUR\"}\n"
-                    "{\"action\":\"wiki\",\"q\":\"...\"}\n"
-                    "{\"action\":\"fetch\",\"url\":\"https://...\"}\n"
-                    "{\"action\":\"answer\",\"text\":\"...\"}\n"
-                    "Maksymalnie 4 kroki. Zawsze odpowiadaj po polsku."
-                )
-                ctx = "\n".join(f'{m["role"]}: {m["content"][:1000]}' for m in mem)
-                scratch = f"Historia rozmowy:\n{ctx}\n\nZapytanie użytkownika: {msg}\n"
-                answer = None
-
-                for step in range(4):
-                    raw = gemini.generate(scratch + "\nTwój krok (JSON):", system_prompt)
-                    m = re.search(r"\{.*\}", raw, re.DOTALL)
-                    try:
-                        act = json.loads(m.group(0)) if m else {"action": "answer", "text": raw}
-                    except Exception:
-                        act = {"action": "answer", "text": raw}
-
-                    if act.get("action") == "answer" or step == 3:
-                        answer = act.get("text") or raw
-                        break
-
-                    obs = ""
-                    action_type = act.get("action")
-                    try:
-                        if action_type == "weather":
-                            obs = json.dumps(get_weather(act["city"]), ensure_ascii=False)
-                        elif action_type == "nbp":
-                            obs = json.dumps(get_nbp_rate(act.get("currency", "EUR")), ensure_ascii=False)
-                        elif action_type == "wiki":
-                            obs = json.dumps(get_wikipedia(act["q"]), ensure_ascii=False)
-                        elif action_type == "fetch":
-                            obs = fetch_url(act["url"], sandbox)[:5000]
-                        else:
-                            obs = f"Nieznana akcja: {action_type}"
-                    except Exception as ex:
-                        obs = f"BŁĄD narzędzia: {ex}"
-
-                    trace.append({"step": step + 1, "action": action_type, "chars": len(obs)})
-                    scratch += f"\nKrok {step+1}: {json.dumps(act, ensure_ascii=False)}\nWynik narzędzia:\n{obs[:3000]}\n"
-
-                if not answer:
-                    answer = gemini.generate(scratch + "\nNapisz końcową odpowiedź po polsku dla użytkownika:", system_prompt)
-
-                db.execute("INSERT INTO daily_memory(session, role, content) VALUES(?, 'assistant', ?)", (session, answer))
-                sandbox.write("answer.md", answer)
-                return {"answer": answer, "trace": trace, "task": tid}
-            except Exception as e:
-                trace.append({"error": f"Błąd Gemini: {e}"})
-
-        # 4. Faza 1 bez klucza (inteligentny dyspozytor darmowych narzędzi)
+        # 4. Tryb awaryjny / bez klucza (inteligentny dyspozytor darmowych narzędzi)
         msg_l = msg.lower()
         url_match = re.search(r"https?://[^\s]+", msg)
 
+        # Sprawdź intencje: Gmail
+        if any(w in msg_l for w in ("mail", "poczta", "skrzynk", "inbox", "wiadomośc")):
+            try:
+                summary = gmail.summarize_inbox(5)
+                answer = f"📬 **Podsumowanie poczty Gmail**:\n\n{summary}"
+                trace.append({"tool": "summarize_inbox", "arguments": {"max_results": 5}, "result_summary": "Pobrano skrzynkę Gmail"})
+            except Exception as e:
+                answer = f"Nie udało się odczytać skrzynki Gmail: {e}"
+                trace.append({"tool": "summarize_inbox", "arguments": {}, "result_summary": f"Błąd: {e}"})
+
         # Sprawdź intencje: pogoda
-        if any(w in msg_l for w in ("pogod", "temperatura", "deszcz", "stopni", "aura", "zimno", "ciepło")):
-            # Wyciągnij miasto
+        elif any(w in msg_l for w in ("pogod", "temperatura", "deszcz", "stopni", "aura", "zimno", "ciepło")):
             words = [w for w in re.findall(r"[A-Za-zĄ-ż]+", msg) if w.lower() not in ("jaka", "jest", "pogoda", "w", "dla", "na", "czy", "będzie", "dziś", "dzisiaj", "jutro")]
             city = words[-1] if words else "Warszawa"
             try:
@@ -362,7 +460,7 @@ class DailyBot(BotBase):
                     f"• Wiatr: {w['wind_speed']} km/h\n\n"
                     f"*Źródło: {w['source']}*"
                 )
-                trace.append({"tool": "Open-Meteo", "city": city})
+                trace.append({"tool": "weather", "arguments": {"city": city}, "result_summary": f"{city}: {w['temperature']}°C"})
             except Exception as e:
                 answer = f"Nie udało się pobrać pogody dla {city}: {e}"
 
@@ -384,7 +482,7 @@ class DailyBot(BotBase):
                     f"• Tabela z dnia: {nbp['effectiveDate']}\n\n"
                     f"*Źródło: {nbp['source']}*"
                 )
-                trace.append({"tool": "NBP", "code": code})
+                trace.append({"tool": "nbp_rates", "arguments": {"currency": code}, "result_summary": f"1 {code} = {nbp['mid']} PLN"})
             except Exception as e:
                 answer = f"Błąd pobierania kursu {code}: {e}"
 
@@ -398,7 +496,7 @@ class DailyBot(BotBase):
                     f"📄 **Pobrano stronę WWW**:\n{first_url_summary(first_lines, target_url)}\n\n"
                     f"Pełna treść ({len(text)} znaków) została zapisana w izolowanym katalogu zadania `{tid}`."
                 )
-                trace.append({"tool": "fetch_url", "url": target_url, "bytes": len(text)})
+                trace.append({"tool": "web_fetch", "arguments": {"url": target_url}, "result_summary": f"Pobrano {len(text)} znaków"})
             except Exception as e:
                 answer = f"Błąd podczas pobierania {target_url}: {e}"
 
@@ -415,25 +513,25 @@ class DailyBot(BotBase):
                     f"🔗 Więcej: {wres['url']}\n"
                     f"*Źródło: {wres['source']}*"
                 )
-                trace.append({"tool": "Wikipedia", "query": q})
+                trace.append({"tool": "wikipedia", "arguments": {"query": q}, "result_summary": f"Hasło: {wres['title']}"})
             except Exception as e:
                 answer = f"Nie znaleziono hasła w Wikipedii dla: '{q}'. Błąd: {e}"
 
         else:
             answer = (
                 f"Cześć! Jestem **Dzienny** — Twój asystent Orbit Bots.\n\n"
-                f"Działam w trybie darmowym (Faza 1) i mam wbudowane narzędzia bez klucza:\n"
+                f"Działam z zestawem narzędzi Fazy 1:\n"
                 f"• 🌤 **Pogoda**: zapytaj np. *„Jaka jest pogoda w Warszawie?”* (Open-Meteo)\n"
                 f"• 💰 **Kursy walut**: zapytaj np. *„Jaki jest kurs euro / dolara?”* (NBP)\n"
                 f"• 📖 **Wikipedia**: zapytaj np. *„Co to jest teleskop Jamesa Webba?”*\n"
-                f"• 🌐 **Pobieranie stron**: wklej dowolny link HTTP/HTTPS (fetch + BeautifulSoup)\n\n"
-                f"Wszystkie zadania zapisuję w izolowanym katalogu roboczym `{tid}`.\n"
-                f"Twoja wiadomość: *„{msg}”* została zapisana w historii sesji `{session}`."
+                f"• 🌐 **Pobieranie stron**: wklej dowolny link HTTP/HTTPS (web_fetch)\n"
+                f"• 📬 **Gmail (tylko odczyt)**: zapytaj np. *„Podsumuj moją skrzynkę”*\n\n"
+                f"Wszystkie zadania zapisuję w izolowanym katalogu `{tid}`."
             )
 
         db.execute("INSERT INTO daily_memory(session, role, content) VALUES(?, 'assistant', ?)", (session, answer))
         sandbox.write("answer.md", answer)
-        return {"answer": answer, "trace": trace, "task": tid}
+        return {"answer": answer, "steps": trace, "task": tid}
 
     def init(self, app):
         router = APIRouter(prefix="/api/daily", tags=["daily"])

@@ -1,95 +1,125 @@
-# Orbit Bots 🚀
+# Orbit Bots 🚀 — Centrum Dowodzenia Agentami AI
 
-Modułowa aplikacja wielobotowa w Pythonie (FastAPI + SQLite, interfejs w języku polskim) zaprojektowana w **architekturze dzielonej**:
-- **Panel (zawsze włączony):** UI, bot lotów, bot asystenta dziennego z darmowymi API, kolejka zadań, sejf Fernet, kontroler Vast.ai. Działa na porcie **5003**.
-- **Worker GPU na Vast.ai RTX 3090 24 GB:** uruchamiany na żądanie dla zadań wymagających dużych modeli (Dolphin 3:8B przez Ollama oraz generowanie wideo Wan 2.1 / LTX). Automatycznie wyłączany po 10 minutach bezczynności.
+Modułowa aplikacja wieloagentowa w Pythonie (FastAPI + SQLite, interfejs w języku polskim, wdrożenie na Render: `https://orbit-bots.onrender.com` na planie darmowym).
+
+W wersji 2.5 trzy wbudowane boty zostały przekształcone w **autonomicznych agentów z narzędziami (function-calling)** zasilanych darmowym endpointem Gemini API zgodnym z OpenAI, z modułem zarządzania kontami, bezpieczną integracją Gmail (tylko odczyt) oraz kolejką zatwierdzeń akcji wrażliwych.
 
 ---
 
-## 🤖 Trzy Wbudowane Boty
+## 🤖 Trzej Autonomiczni Agenci z Narzędziami
 
-### 1. ✈ Łowca lotów (`flights`)
-- **Trasy:** wyloty z 14 polskich portów lotniczych (m.in. WAW, WMI, KRK, GDN, KTW, WRO, POZ) do dowolnego portu IATA na wybrany miesiąc.
-- **Źródło cen:** Ryanair farfnd (<span style="color:#f87171;font-weight:bold;">NIEOFICJALNE</span>, odpytywane co 6 godzin).
-- **Okazje:** RSS portalu [Fly4free.pl](https://www.fly4free.pl/feed/) odpytywany co 2 godziny, z pełną deduplikacją po linku i automatycznym wykrywaniem polskich miast oraz cen.
-- **Wykresy i alerty:** historia najniższych cen z wykresem liniowym SVG, widok słupkowy dzień po dniu w miesiącu, alerty przy przekroczeniu progu cenowego lub spadku o X%, przycisk testowego alertu.
+Każdy z agentów korzysta ze wspólnego, niezależnego od UI rdzenia `core/agent.py` (gotowego do późniejszego bezpośredniego użycia przez adapter Telegrama) oraz pętli function-calling z modelem `gemini-3.5-flash-lite` (klucz pobierany wyłącznie ze zmiennej `LLM_API_KEY`). Maksymalny limit kroków na zapytanie: `MAX_TOOL_STEPS = 6`.
+
+### 1. ✈ Łowca lotów (`flights`) — Agent Podróżniczy
+- **Narzędzia agenta:**
+  - `ryanair_search(origin, dest, month)` — wyszukiwanie najtańszych taryf per dzień z oficjalnego serwera farfnd z 14 polskich lotnisk (m.in. WMI, WAW, KRK, GDN).
+  - `fly4free_search(query, limit)` — przeszukiwanie okazji z serwisu Fly4free.pl (z automatyczną deduplikacją po linku).
+  - `price_alert_add(origin, dest, month, threshold, drop_pct)` — natychmiastowe utworzenie alertu cenowego i weryfikacja.
+  - `price_alert_list()` — lista wszystkich aktywnych tras i ich ostatnich cen.
+  - `price_alert_remove(route_id)` — usunięcie alertu trasy.
+- **Interfejs:** Dedykowany czat z agentem prezentujący wywołane narzędzia i wyniki, formularz tras oraz interaktywny wykres liniowy SVG.
 - **Awatar:** Powiewająca flaga Chin SVG/CSS z filtrem `feTurbulence` i animacją `baseFrequency`.
 
-### 2. 🛰 Dzienny (`daily`)
-- **Czat po polsku:** pamięć ostatnich 12 wiadomości w SQLite (`daily_memory`), przycisk „Zapomnij”.
-- **Darmowe narzędzia (Faza 1 — bez klucza):**
-  - **Open-Meteo:** aktualna pogoda i prognoza dla dowolnego miasta.
-  - **NBP API:** oficjalne średnie kursy walut (EUR, USD, GBP, CHF itp.).
-  - **Wikipedia:** streszczenia i wyszukiwarka haseł w języku polskim.
-  - **Fetch + BeautifulSoup:** czyszczenie i pobieranie stron WWW z cache TTL.
-- **Bezpieczeństwo sandboxa:** każde zadanie otrzymuje izolowany katalog roboczy `data/tasks/<id>/`. Próby wyjścia poza katalog (`../../x`) są bezwzględnie blokowane.
-- **Faza 2:** model Dolphin 3:8B przez Ollama na workerze GPU.
-- **Awatar:** Satelita krążący na eliptycznej orbicie wokół planety (czysty CSS/SVG).
+### 2. 🛰 Dzienny (`daily`) — Osobisty Agent Zadań i Poczty
+- **Narzędzia agenta:**
+  - `weather(city)` — prognoza pogody z darmowego API Open-Meteo bez klucza.
+  - `nbp_rates(currency)` — oficjalne średnie kursy walut z Narodowego Banku Polskiego (NBP API).
+  - `wikipedia(query, lang)` — streszczenia i wyszukiwarka haseł w polskiej Wikipedii.
+  - `web_fetch(url)` — bezpieczne pobieranie treści stron WWW (tylko protokoły HTTP/HTTPS, metoda GET, limit rozmiaru, bez skryptów/styli).
+  - `list_recent_emails(max_results)` — odczyt listy ostatnich wiadomości z Gmaila.
+  - `search_emails(query, max_results)` — wyszukiwanie maili według słów kluczowych i nadawcy.
+  - `read_email(message_id)` — odczyt pełnej treści wiadomości e-mail.
+  - `summarize_inbox(max_results)` — generowanie zwięzłego podsumowania skrzynki odbiorczej.
+  - `browser_navigate(url)`, `browser_fill(selector, value)`, `browser_click(selector, is_payment)`, `browser_register_account(service, register_url)` — pełna automatyzacja przeglądarki Playwright (headless Chromium).
+- **Interfejs:** Czat z pamięcią kontekstu w SQLite (`daily_memory`), szybkie przyciski narzędziowe oraz wizualne bloczki kroków agenta (rozwijana lista wykonanych narzędzi z parametrami i podsumowaniem).
+- **Awatar:** Satelita krążący na orbicie eliptycznej (czysty CSS/SVG).
 
-### 3. 🎬 Wideo (`video`)
-- **Generowanie wideo AI:** formularz wprowadzania promptu, wyboru modelu, proporcji obrazu (16:9, 9:16, 1:1) i liczby klipów (1–6).
-- **Faza 1 (darmowa):** Space Hugging Face `Lightricks/ltx-video-distilled` przez `gradio_client`. Wyczerpanie limitu ZeroGPU wyświetla przyjazny komunikat zamiast błędu.
-- **Faza 2 (lokalna na GPU):** modele `Wan-AI/Wan2.1-T2V-1.3B-Diffusers` (480p, 81 klatek, ~8 GB VRAM) oraz `Lightricks/LTX-Video`.
-- **Łączenie klipów:** automatyczne scalanie klipów za pomocą narzędzia FFmpeg (`concat`) w jeden plik MP4 z dźwiękiem AAC.
-- **Podgląd i pobieranie:** odtwarzacz wideo bezpośrednio w przeglądarce oraz pobieranie gotowego pliku MP4.
-- **Awatar:** Kometa ze szpulą filmową i świecącym ogonem z klatek taśmy filmowej (animacja CSS/SVG).
-
----
-
-## 🌌 Wygląd i Interfejs (UI)
-
-- Ciemny motyw kosmiczny (gradient `#070b1a → #111a3a`), migoczące gwiazdy w czystym CSS.
-- Karty glassmorphism (`backdrop-filter: blur(14px)`), zaokrąglenia 14px, akcenty `#7c5cff` i `#22d3ee`.
-- **Zero zewnętrznych plików graficznych lub czcionek** — wszystkie awatary, logotypy i wykresy to inline SVG i style CSS.
-- Responsywny pasek boczny ze wskaźnikami statusu (zielony = aktywny, pomarańczowy = brak klucza, niebieski = startuje GPU) i licznikiem alertów.
-- Kafel kontrolera Vast.ai ze stanem instancji, stawką godzinową, kosztem bieżącej sesji oraz przyciskami Start/Stop.
+### 3. 🎬 Wideo (`video`) — Agent Kreatywny
+- **Narzędzia agenta:**
+  - `ltx_enqueue(prompt, duration, aspect, clips, model, style, seed)` — kolejkowanie generowania klipów wideo (darmowy Hugging Face Space Lightricks LTX lub opcjonalny worker GPU Vast.ai).
+  - `ltx_status(job_id)` — sprawdzanie postępu i statusu wyrenderowanych filmów.
+- **FFmpeg:** Automatyczne scalanie wygenerowanych klipów w gotowy plik MP4 z dźwiękiem AAC.
+- **Awatar:** Kometa ze szpulą filmową i świecącym ogonem z taśmy filmowej (animacja CSS/SVG).
 
 ---
 
-## 🛠 Instalacja i Uruchomienie
+## 📬 Integracja Gmail (Tylko Odczyt)
 
-### Wymagania
-- Python 3.11+
-- FFmpeg (do łączenia klipów wideo)
+- **OAuth 2.0 Web Flow:** Oficjalny przepływ Google OAuth 2.0 z endpointami `/auth/google/start` i `/auth/google/callback` (z weryfikacją losowego tokenu `state`).
+- **Ścisły zakres uprawnień (Scope):** Wyłącznie `https://www.googleapis.com/auth/gmail.readonly`.
+- **Gwarancja bezpieczeństwa:** W całym projekcie **nie istnieje żaden kod** do wysyłania wiadomości, odpowiadania, tworzenia wersji roboczych ani usuwania maili.
+- **Szyfrowanie tokenów:** Klucze autoryzacyjne (`access_token`, `refresh_token`) są natychmiast szyfrowane i zapisywane w sejfie Fernet.
+- **Krok po kroku:** Zobacz dedykowany przewodnik [docs/GMAIL_SETUP.md](docs/GMAIL_SETUP.md) opisujący konfigurację projektu w Google Cloud Console i zmiennych w Renderze.
 
-### 1. Przygotowanie środowiska
+---
+
+## 🌐 Narzędzia Przeglądarki Headless (Playwright, Chromium)
+
+- **Automatyzacja Webowa:** otwieranie stron (`browser_navigate`), wypełnianie pól formularzy (`browser_fill`), klikanie przycisków (`browser_click`), zakładanie kont na stronach (`browser_register_account`), przechodzenie do koszyka i kasy.
+- **Bezpieczeństwo danych użytkownika:** dane logowania pobierane z sejfu Fernet; nowe hasła są generowane losowo (kryptograficznie silne) i natychmiast szyfrowane w sejfie.
+- **Ochrona danych kart:** numery kart płatniczych i kody CVV/CVC są automatycznie maskowane — nigdy nie są zapisywane w kodzie ani logowane.
+- **Blokada przed płatnością:** przed ostatecznym kliknięciem *Zapłać* / *Złóż zamówienie* agent **bezwzględnie zatrzymuje się** i generuje w panelu podsumowanie (sklep, kwota, lista pozycji) z przyciskiem *Zatwierdź*. Bez wyraźnej akceptacji użytkownika w panelu żadna płatność nie zostanie zrealizowana.
+- **Zakaz obchodzenia CAPTCHA / 2FA / SMS:** po napotkaniu wyzwania antybotowego lub kodu SMS agent natychmiast pauzuje i prosi użytkownika o podanie kodu w sekcji 2FA panelu.
+
+---
+
+## 🔑 Moduł Zarządzania Kontami (`core/accounts.py`)
+
+- **Jednorazowe podłączenie:** Użytkownik łączy każde konto raz (preferowane OAuth z automatycznym odnawianiem tokenów).
+- **Konta bez OAuth:** Dane logowania są szyfrowane kluczem Fernet i przechowywane w sejfie.
+- **Flaga zgody (Consent per account):** Każde konto posiada niezależną flagę zgody. Agent ma prawo korzystać **wyłącznie z kont z aktywną zgodą**. Wycofanie zgody natychmiast blokuje dostęp agenta (wyjątek `PermissionError`).
+- **Kolejka do zatwierdzenia:** Każda próba wykonania akcji wrażliwej (wysłanie, zakup, publikacja) jest wstrzymywana (`status: pending_approval`) i wymaga manualnego potwierdzenia użytkownika w UI.
+- **Zakaz obchodzenia 2FA/CAPTCHA:** W przypadku wykrycia wymogu uwierzytelnienia dwuskładnikowego, agent natychmiast pauzuje i prosi użytkownika o kod w sekcji 2FA.
+- **Strona „Konta & Zgody”:** Pełna lista powiązanych usług, przełączniki zgody, przyciski odłączania, kolejka akcji do zatwierdzenia oraz formularz kodów 2FA.
+
+---
+
+## 🛡️ Bezpieczeństwo i Ochrona Hasłem
+
+- Zmienna `ORBIT_PANEL_PASSWORD` chroni cały panel oraz API za pomocą HTTP Basic Auth.
+- Wyjątki wyjęte spod autoryzacji: `/health`, `/healthz` oraz callback OAuth `/auth/google/callback`.
+- **Kluczowa reguła bezpieczeństwa:** Jeżeli w aplikacji podłączono skrzynkę pocztową lub jakiekolwiek konto serwisowe, a hasło `ORBIT_PANEL_PASSWORD` nie zostało skonfigurowane w zmiennych środowiskowych — aplikacja **bezwzględnie odmawia dostępu** (zwracając kod `403 Forbidden`).
+
+---
+
+## ⚙️ Zmienne Środowiskowe
+
+Skopiuj szablon `.env.example` lub uzupełnij zmienne w panelu Render ➔ Environment:
+
 ```bash
-cd /workspace/orbit
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+# Klucz darmowego Gemini API (Google AI Studio)
+LLM_API_KEY=twoj-klucz-gemini
+
+# Google OAuth 2.0 (Gmail Read-Only)
+GOOGLE_CLIENT_ID=twoj-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=twoj-sekret
+GOOGLE_REDIRECT_URI=https://orbit-bots.onrender.com/auth/google/callback
+
+# Hasło panelu (wymagane przy podłączonych kontach)
+ORBIT_PANEL_PASSWORD=twoje-silne-haslo-panelu
 ```
 
-### 2. Uruchomienie aplikacji (port 5003)
-```bash
-python app.py
-```
-Aplikacja jest dostępna w przeglądarce pod adresem: **http://localhost:5003**.
-
 ---
 
-## 🔐 Sejf Kluczy (Fernet) i Bezpieczeństwo
+## 🧪 Testy Pytest
 
-- Wszystkie sekrety (np. klucz API Vast.ai, tokeny dostępu workera) są szyfrowane algorytmem Fernet.
-- Klucz szyfrujący przechowywany jest **poza repozytorium**: `~/.orbit/vault.key` (uprawnienia `chmod 600`) lub w zmiennej środowiskowej `ORBIT_VAULT_KEY_B64`.
-- Interfejs API i widok WWW udostępniają **wyłącznie nazwy pozycji**, nigdy wartości kluczy.
-- Wartości poufne nie trafiają do logów ani bazy w postaci jawnej.
+Projekt posiada kompletny zestaw 35 testów jednostkowych i integracyjnych (w tym testy z mockowanym LLM, Gmail oraz mockowanym sklepem w Playwright):
 
----
-
-## 🧪 Testy Akceptacyjne
-
-Pełny zestaw 21 testów jednostkowych i integracyjnych uruchamia się poleceniem:
 ```bash
 .venv/bin/pytest tests/ -v
 ```
 
-Szczegółowe wyniki testów z rzeczywistymi danymi z API znajdują się w dokumencie [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
-
----
-
-## 📚 Dokumentacja Szczegółowa
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) — pełny opis architektury dzielonej z diagramem Mermaid.
-- [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md) — zestawienie wyników wszystkich testów akceptacyjnych.
-- [docs/DEPLOY_VAST.md](docs/DEPLOY_VAST.md) — przewodnik wdrożenia workera GPU na platformie Vast.ai (RTX 3090).
+Wszystkie testy weryfikują m.in.:
+1. Pętlę function-calling agenta z mockowanym Gemini API.
+2. Bezwzględny limit `MAX_TOOL_STEPS = 6`.
+3. Kompletność rejestrów narzędzi dla 3 botów.
+4. Ścisły zakres uprawnień Gmail wyłącznie `readonly`.
+5. Całkowity brak kodu do wysyłania lub usuwania wiadomości.
+6. Egzekwowanie zgody per konto (`consent=True/False`).
+7. Blokadę akcji wrażliwych bez zatwierdzenia w UI.
+8. Pauzę przy żądaniu 2FA.
+9. Ochronę hasłem `ORBIT_PANEL_PASSWORD` oraz blokadę 403.
+10. Otwieranie stron, wypełnianie formularzy i szyfrowanie haseł w Playwright.
+11. Zatrzymanie przed finalizacją płatności w sklepie i blokadę zakupu bez zatwierdzenia.
+12. Ochronę danych kart płatniczych i brak ich logowania.
+13. Pauzę przy wykryciu CAPTCHA / 2FA / SMS w przeglądarce.
