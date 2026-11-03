@@ -1,0 +1,22 @@
+ZADANIE: Orbit Bots (/workspace/orbit, FastAPI, deploy z GitHub cywinskikrzysztof4-a11y/orbit-bots na https://orbit-bots.onrender.com, plan darmowy) – zamień 3 boty w agentów z narzędziami.
+
+1. RDZEŃ AGENTA core/agent.py, niezależny od UI (później adapter Telegrama użyje go bez zmian): pętla function-calling przez darmowe Gemini API, endpoint zgodny z OpenAI (https://generativelanguage.googleapis.com/v1beta/openai/), model gemini-3.5-flash-lite, klucz tylko z env LLM_API_KEY (nigdy w kodzie/logach/repo). MAX_TOOL_STEPS=6. Zwraca odpowiedź + listę kroków (narzędzie, argumenty, skrót wyniku).
+
+2. NARZĘDZIA:
+- lotniczy: ryanair_search, fly4free_search, price_alert_add/list/remove;
+- codzienny: weather (Open-Meteo), nbp_rates, wikipedia, web_fetch (tylko GET, limit rozmiaru), narzędzia Gmail;
+- wideo: ltx_enqueue, ltx_status.
+
+3. GMAIL TYLKO ODCZYT: OAuth 2.0 web flow, scope wyłącznie gmail.readonly, GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET z env, endpointy /auth/google/start i /auth/google/callback (z state), tokeny zaszyfrowane w istniejącym sejfie Fernet. Narzędzia: list_recent_emails, search_emails, read_email, summarize_inbox. ŻADNEGO kodu do wysyłania, odpowiadania ani usuwania.
+
+4. MODUŁ KONT core/accounts.py: użytkownik podłącza każde konto raz. Preferuj OAuth; refresh tokeny odnawiane automatycznie. Dla serwisów bez OAuth: login/hasło zaszyfrowane w sejfie Fernet + flaga zgody per konto. Agenci automatycznie używają zapisanych sesji, ale tylko kont z zgodą. Każda akcja wysłania/zakupu/publikacji wymaga jawnego potwierdzenia użytkownika w UI (kolejka "do zatwierdzenia"). Zakaz obchodzenia CAPTCHA/2FA: gdy potrzebne 2FA, agent pauzuje i pyta użytkownika. Strona "Konta": lista, zgoda, odłączenie.
+
+5. UI czatu pokazuje kroki agenta (wywołane narzędzia i wyniki).
+
+6. BEZPIECZEŃSTWO: hasło ORBIT_PANEL_PASSWORD chroni wszystkie strony i API (poza callbackiem OAuth i /health); gdy podłączona poczta/konta, a hasła brak – odmów dostępu.
+
+7. TESTY pytest z mockowanym LLM i Gmail: pętla, limit 6 kroków, rejestry, scope tylko readonly, brak send/delete, zgoda per konto, blokada akcji bez potwierdzenia, pauza przy 2FA, ochrona hasłem. Wszystkie testy (stare i nowe) muszą przejść – uruchom i pokaż wynik.
+
+8. docs/GMAIL_SETUP.md po polsku krok po kroku: darmowy projekt Google Cloud, włączenie Gmail API, ekran zgody w trybie Testing, dodanie siebie jako test user, klient OAuth Web z redirect URI https://orbit-bots.onrender.com/auth/google/callback, ustawienie GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, LLM_API_KEY, ORBIT_PANEL_PASSWORD w Render → Environment. Zaktualizuj README i .env.example (bez wartości).
+
+ZAKAZY: zero wydatków i płatnych API, nie ruszaj portów 5000-5002, nie commituj sekretów (.env w .gitignore), nie uruchamiaj maszyn Vast.ai. Na końcu: lista zmienionych plików i wynik testów.
