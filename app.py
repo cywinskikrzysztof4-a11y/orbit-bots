@@ -1,14 +1,14 @@
 """Orbit Bots — modułowa aplikacja wielobotowa (FastAPI + SQLite, UI po polsku).
 Start: .venv/bin/python app.py  (port 5003).
 """
-import os, importlib, base64, secrets as _secrets
+import os, importlib, base64, threading, secrets as _secrets
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header, Query, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from core import db, alerts, vault, config, queue, accounts, gmail
+from core import db, alerts, vault, config, queue, accounts, gmail, activity, keepalive
 from core.registry import BOTS
 from core.scheduler import Scheduler
 from core.vast import VastController
@@ -24,11 +24,13 @@ vast_ctrl = VastController()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: uruchomienie harmonogramu i wątku kolejki
+    # Startup: uruchomienie harmonogramu, wątku kolejki i pętli keep-alive (tylko w Codespaces)
     queue.start_worker()
     sched.start()
+    keepalive.start_keepalive()
     yield
     # Shutdown
+    keepalive.stop_keepalive()
     sched.stop()
     queue.stop_worker()
 
@@ -36,7 +38,7 @@ app = FastAPI(title="Orbit Bots", version="2.0.0", lifespan=lifespan)
 
 # Bezpieczeństwo (Wymóg 6): hasło ORBIT_PANEL_PASSWORD chroni wszystkie strony i API (poza callbackiem OAuth i /health).
 # Gdy podłączona poczta/konta, a hasła brak – odmów dostępu (403 Forbidden).
-EXEMPT_PATHS = ("/health", "/healthz", "/auth/google/callback")
+EXEMPT_PATHS = ("/health", "/healthz", "/auth/google/callback", "/api/health/busy", "/api/jobs/run-scheduled")
 
 @app.middleware("http")
 async def _panel_auth(request: Request, call_next):
@@ -74,6 +76,11 @@ async def _panel_auth(request: Request, call_next):
 @app.get("/healthz")
 def health_check():
     return {"ok": True, "status": "healthy"}
+
+@app.get("/api/health/busy")
+def get_health_busy():
+    """Zwraca status obciążenia: liczbę aktywnych zadań, zadań w kolejce i znacznik ostatniej aktywności."""
+    return activity.get_busy_status()
 
 # Montowanie plików statycznych
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -146,6 +153,76 @@ def get_jobs_status():
         ],
         "queue": queue.list_jobs(limit=20),
         "log": db.query("SELECT bot, job, status, substr(info, 1, 200) AS info, created FROM jobs_log ORDER BY id DESC LIMIT 25")
+    }
+
+@app.post("/api/jobs/run-scheduled")
+def run_scheduled_jobs(
+    authorization: str | None = Header(None),
+    x_orbit_token: str | None = Header(None),
+    x_github_token: str | None = Header(None),
+    token: str | None = Query(None),
+    wait: bool = Query(False),
+    payload: dict | None = Body(None)
+):
+    """Uruchamia zaplanowane zadania botów.
+    Chroniony tokenem ze zmiennych środowiskowych (CODESPACE_PAT lub ORBIT_JOB_TOKEN).
+    Token można przekazać w nagłówku Authorization (Bearer), X-Orbit-Token, X-Github-Token,
+    w parametrze query ?token=... lub w ciele JSON {"token": "..."}.
+    """
+    expected = (
+        os.environ.get("CODESPACE_PAT", "").strip()
+        or os.environ.get("ORBIT_JOB_TOKEN", "").strip()
+        or os.environ.get("ORBIT_PANEL_PASSWORD", "").strip()
+    )
+    if not expected:
+        raise HTTPException(
+            status_code=500,
+            detail="Brak skonfigurowanego tokenu w zmiennych środowiskowych serwera (ustaw CODESPACE_PAT lub ORBIT_JOB_TOKEN)"
+        )
+
+    provided = ""
+    if authorization:
+        provided = authorization[7:].strip() if authorization.startswith("Bearer ") else authorization.strip()
+    elif x_orbit_token:
+        provided = x_orbit_token.strip()
+    elif x_github_token:
+        provided = x_github_token.strip()
+    elif token:
+        provided = token.strip()
+    elif payload and isinstance(payload, dict) and payload.get("token"):
+        provided = str(payload.get("token")).strip()
+
+    if not provided or not _secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Nieprawidłowy token autoryzacji")
+
+    bot_filter = None
+    if payload and isinstance(payload, dict) and payload.get("bots"):
+        bot_filter = payload.get("bots")
+
+    scheduled_jobs = [f"{j['bot']}:{j['name']}" for j in sched.jobs if j["bot"] != "core"]
+
+    if wait:
+        with activity.track_task("scheduled_jobs_sync_batch"):
+            results = sched.run_all_scheduled(bots=bot_filter)
+        return {
+            "ok": True,
+            "status": "completed",
+            "results": results,
+            "active": activity.get_active_count()
+        }
+
+    def _run_batch_in_background():
+        with activity.track_task("scheduled_jobs_batch"):
+            sched.run_all_scheduled(bots=bot_filter)
+
+    t = threading.Thread(target=_run_batch_in_background, daemon=True, name="ScheduledJobsRunner")
+    t.start()
+
+    return {
+        "ok": True,
+        "status": "started",
+        "jobs": scheduled_jobs,
+        "active": activity.get_active_count()
     }
 
 # ----------------- GMAIL OAUTH 2.0 WEB FLOW -----------------

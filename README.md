@@ -137,3 +137,57 @@ Darmowy test z lokalnymi modelami (bez Gemini, bez kluczy):
 5. Logi: `/tmp/orbit.log`, `/tmp/ollama.log`, `/tmp/ollama-pull.log`. Postęp pobierania modeli: `tail -f /tmp/ollama-pull.log`.
 
 Ograniczenia: darmowy limit to 120 rdzeniogodzin/mies. (~30 h na 4 rdzeniach), Codespace zatrzymuje się po ok. 30 min bezczynności, a model 8B na CPU odpowiada wolno (kilka tokenów/s). Konfiguracja Render/Gemini pozostaje bez zmian.
+
+---
+
+## ⏰ Automatyczne Wybudzanie Codespace i Harmonogram Zadań
+
+System umożliwia cykliczne uruchamianie zadań w tle (np. sprawdzanie cen lotów, agregacja ofert, zadania agentów, generowanie wideo) w bezpłatnym środowisku GitHub Codespaces, z zachowaniem automatycznego uśpienia po zakończeniu pracy.
+
+Wdrożono:
+1. **Thread-safe licznik zadań (`core/activity.py`):** monitoruje liczbę aktywnych wątków zadań (`active`), oczekujących zadań w kolejce SQLite (`queued`) oraz znacznik ostatniej aktywności (`last_activity`). Dostępny przez endpoint `GET /api/health/busy`.
+2. **Pętlę keep-alive (`core/keepalive.py`):** aktywna **wyłącznie** przy `CODESPACES=true`. Dopóki `active > 0`, co ~4 min generuje aktywność (wypisanie na terminal stdout z flushem + modyfikacja pliku w przestrzeni roboczej `data/.codespace_keepalive`), co resetuje licznik idle timeout w GitHub Codespaces. Gdy `active == 0`, pętla nie generuje żadnego sygnału, pozwalając Codespace zasnąć po 30 min bezczynności. Na Renderze mechanizm pozostaje wyłączony.
+3. **Workflow GitHub Actions (`.github/workflows/wake-codespace.yml`):** wybudza Codespace przez GitHub API, czeka na stan `Available`, po czym wywołuje endpoint `POST /api/jobs/run-scheduled` zabezpieczony tokenem.
+
+### 1. Jak wygenerować Personal Access Token (PAT)
+1. W profilu GitHub przejdź do: **Settings ➔ Developer Settings ➔ Personal Access Tokens ➔ Tokens (classic)** (lub Fine-grained tokens).
+2. Kliknij **Generate new token (classic)**.
+3. Nazwij token (np. `Orbit-Codespaces-Controller`).
+4. Zaznacz uprawnienie **`codespace`** (pełna kontrola nad tworzeniem, uruchamianiem i zatrzymywaniem codespaces).
+5. Wygeneruj i skopiuj token (zaczyna się od `ghp_`).
+
+### 2. Jak ustawić Secret w repozytorium (`CODESPACE_PAT`)
+1. W repozytorium GitHub wejdź w: **Settings ➔ Secrets and variables ➔ Actions**.
+2. W sekcji **Repository secrets** kliknij przycisk **New repository secret**.
+3. Jako **Name** wpisz: `CODESPACE_PAT`.
+4. Jako **Secret** wklej skopiowany wcześniej token PAT.
+5. Kliknij **Add secret**.
+6. *(Zalecane)* W **Settings ➔ Secrets and variables ➔ Codespaces** również dodaj secret `CODESPACE_PAT` (lub `ORBIT_JOB_TOKEN`), aby środowisko Codespace miało dostęp do tej zmiennej i automatycznie autoryzowało zapytania do endpointu `/api/jobs/run-scheduled`.
+
+### 3. Jak ustawić Zmienną repozytorium (`CODESPACE_NAME`)
+1. W repozytorium wejdź w: **Settings ➔ Secrets and variables ➔ Actions ➔ Zakładka Variables**.
+2. Kliknij **New repository variable**.
+3. Jako **Name** wpisz: `CODESPACE_NAME`.
+4. Jako **Value** wpisz nazwę swojego Codespace (np. `fictional-guacamole-4qvxgrw5pj64h77v9`).
+5. Gdzie znaleźć nazwę Codespace?
+   - W terminalu: wykonaj polecenie `gh codespace list`.
+   - W przeglądarce: wejdź na [github.com/codespaces](https://github.com/codespaces) — unikalna nazwa jest widoczna pod nazwą repozytorium.
+
+### 4. Harmonogram (cron) i uruchamianie ręczne
+Workflow zdefiniowany jest w pliku `.github/workflows/wake-codespace.yml`.
+- **Harmonogram automatyczny:** domyślnie skonfigurowano uruchamianie codziennie o godzinie 05:00 UTC (`cron: '0 5 * * *'`). Możesz zmienić to pole na dowolną składnię cron, np.:
+  - `'0 */6 * * *'` — co 6 godzin
+  - `'0 6,18 * * *'` — dwa razy dziennie (o 06:00 i 18:00 UTC)
+- **Uruchomienie ręczne (`workflow_dispatch`):**
+  1. Wejdź w zakładkę **Actions** w repozytorium.
+  2. Wybierz workflow **Wake Codespace & Run Scheduled Jobs** z lewej listy.
+  3. Kliknij rozwijane menu **Run workflow** i zatwierdź zielonym przyciskiem.
+  4. Opcjonalny parametr `wait_for_completion` pozwala wybrać, czy wywołanie ma czekać synchronicznie na zakończenie wszystkich zadań (`true`), czy uruchomić je w tle i natychmiast zakończyć krok workflow (`false`).
+
+### 5. Ograniczenia i ważne zasady działania
+- **Idle timeout (30 minut):** GitHub Codespaces domyślnie usypia maszynę po 30 minutach bezczynności. Gdy zadania botów dobiegną końca (`active=0`), pętla keep-alive milknie, a maszyna samoistnie się wyłącza.
+- **Twardy limit 12 godzin (Absolute Lifetime Limit):** Niezależnie od keep-alive, ruchów myszą czy procesów terminala, GitHub zamyka każdy działający kontener Codespace po maksymalnie 12 godzinach ciągłej pracy.
+- **Miesięczny limit darmowych godzin:** Darmowe konta GitHub posiadają 120 rdzeniogodzin/miesiąc (dla domyślnej maszyny 4-core oznacza to ~30 godzin pracy na pełnych obrotach). Dzięki wybudzaniu tylko na czas pracy zadań i automatycznemu usypianiu po skończeniu, pula darmowych godzin wystarcza na codzienne operacje.
+- **Środowisko produkcyjne Render:** Działa w 100% bez zmian (`CODESPACES` nie jest ustawione, więc pętla keep-alive nie startuje, a aplikacja działa w standardowym trybie ciągłym/darmowym).
+- **Bezpieczeństwo tokenów:** W kodzie repozytorium ani w logach **nie ma żadnych tokenów**. Token autoryzacyjny jest wstrzykiwany w czasie wykonywania workflow wyłącznie z bezpiecznego magazynu sekretów GitHuba.
+

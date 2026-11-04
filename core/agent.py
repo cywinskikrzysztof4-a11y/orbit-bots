@@ -9,6 +9,7 @@ import json
 import logging
 import requests
 from typing import Callable, Any
+from . import activity
 
 logger = logging.getLogger("orbit.agent")
 
@@ -134,6 +135,13 @@ class Agent:
 
     def run(self, prompt: str, history: list[dict] | None = None) -> AgentResult:
         """Główna pętla wykonawcza agenta: prompt + opcjonalna historia -> odpowiedź + kroki."""
+        tid = activity.start_task(f"agent:{self.name}")
+        try:
+            return self._run_loop(prompt, history)
+        finally:
+            activity.finish_task(tid)
+
+    def _run_loop(self, prompt: str, history: list[dict] | None = None) -> AgentResult:
         api_key = self._get_api_key()
         if not api_key:
             return AgentResult(
