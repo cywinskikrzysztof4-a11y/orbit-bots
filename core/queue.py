@@ -3,7 +3,7 @@ Tabela jobs: id, bot, kind, payload_json, status[queued|running|done|error], gpu
 Zadania GPU wykonuje worker po kolei (jedno naraz).
 """
 import os, json, time, threading, traceback
-from . import db
+from . import db, activity
 
 db.init("""
 CREATE TABLE IF NOT EXISTS jobs (
@@ -83,6 +83,11 @@ def count_pending_gpu() -> int:
     rows = db.query("SELECT COUNT(*) AS c FROM jobs WHERE gpu = 1 AND status IN ('queued', 'running')")
     return rows[0]["c"] if rows else 0
 
+def count_queued() -> int:
+    """Liczba oczekujących zadań w kolejce (status = 'queued')."""
+    rows = db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'queued'")
+    return rows[0]["c"] if rows else 0
+
 def set_status(job_id: int, status: str, result: dict = None, error: str = None):
     """Aktualizuje status zadania."""
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -115,9 +120,10 @@ def _process_one_job():
     def _execute():
         set_status(jid, "running")
         try:
-            payload = json.loads(job.get("payload_json") or "{}")
-            res = fn(jid, payload)
-            set_status(jid, "done", result=res if isinstance(res, dict) else {"result": res})
+            with activity.track_task(f"queue:{bot}:{kind}:{jid}"):
+                payload = json.loads(job.get("payload_json") or "{}")
+                res = fn(jid, payload)
+                set_status(jid, "done", result=res if isinstance(res, dict) else {"result": res})
         except Exception as e:
             tb = traceback.format_exc()
             set_status(jid, "error", error=str(e), result={"traceback": tb[-1000:]})
