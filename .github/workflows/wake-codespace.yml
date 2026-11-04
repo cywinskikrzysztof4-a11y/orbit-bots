@@ -1,0 +1,118 @@
+name: Wake Codespace & Run Scheduled Jobs
+
+on:
+  schedule:
+    # Codziennie o godzinie 05:00 UTC (dostosuj harmonogram wg własnych potrzeb)
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+    inputs:
+      wait_for_completion:
+        description: 'Czekaj na synchroniczne zakończenie zadań (true/false)'
+        required: false
+        default: 'false'
+
+jobs:
+  wake-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Weryfikacja parametrów (CODESPACE_PAT oraz CODESPACE_NAME)
+        env:
+          CODESPACE_PAT: ${{ secrets.CODESPACE_PAT }}
+          CODESPACE_NAME_VAR: ${{ vars.CODESPACE_NAME }}
+        run: |
+          if [ -z "$CODESPACE_PAT" ]; then
+            echo "::error::Brak sekretu CODESPACE_PAT! Dodaj go w Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          # Jeśli zmienna repozytorium CODESPACE_NAME nie jest zdefiniowana, użyj domyślnej nazwy
+          NAME="${CODESPACE_NAME_VAR:-fictional-guacamole-4qvxgrw5pj64h77v9}"
+          echo "Docelowa nazwa Codespace: $NAME"
+          echo "CODESPACE_NAME=$NAME" >> $GITHUB_ENV
+
+      - name: Uruchomienie Codespace przez GitHub API (POST /user/codespaces/$NAME/start)
+        env:
+          CODESPACE_PAT: ${{ secrets.CODESPACE_PAT }}
+        run: |
+          echo "Wysyłanie żądania wybudzenia Codespace: $CODESPACE_NAME..."
+          HTTP_CODE=$(curl -s -o /tmp/start_resp.json -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $CODESPACE_PAT" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/user/codespaces/$CODESPACE_NAME/start")
+
+          echo "Kod odpowiedzi HTTP API start: $HTTP_CODE"
+          cat /tmp/start_resp.json 2>/dev/null || true
+          echo ""
+
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ] || [ "$HTTP_CODE" = "409" ]; then
+            echo "Polecenie wybudzenia zostało przyjęte pomyślnie."
+          else
+            echo "::warning::Nieoczekiwany kod HTTP $HTTP_CODE przy wywołaniu start."
+          fi
+
+      - name: Oczekiwanie na stan Available (GET /user/codespaces/$NAME)
+        env:
+          CODESPACE_PAT: ${{ secrets.CODESPACE_PAT }}
+        run: |
+          echo "Oczekiwanie aż Codespace osiągnie stan 'Available'..."
+          MAX_ATTEMPTS=45
+          DELAY=10
+          READY=0
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            STATE=$(curl -s \
+              -H "Authorization: Bearer $CODESPACE_PAT" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/user/codespaces/$CODESPACE_NAME" | jq -r '.state // "Unknown"')
+
+            echo "[$i/$MAX_ATTEMPTS] Aktualny stan: $STATE"
+            if [ "$STATE" = "Available" ]; then
+              echo "Codespace jest dostępny (Available)!"
+              READY=1
+              break
+            fi
+            sleep $DELAY
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            echo "::error::Codespace nie osiągnął stanu Available w zadanym czasie ($((MAX_ATTEMPTS * DELAY))s)."
+            exit 1
+          fi
+
+      - name: Oczekiwanie na inicjalizację serwera aplikacji (port 8000)
+        run: |
+          echo "Odczekanie 20s na ukończenie post-start.sh i uruchomienie serwera Orbit..."
+          sleep 20
+
+      - name: Wywołanie endpointu POST /api/jobs/run-scheduled
+        env:
+          CODESPACE_PAT: ${{ secrets.CODESPACE_PAT }}
+          WAIT_PARAM: ${{ github.event.inputs.wait_for_completion || 'false' }}
+        run: |
+          TARGET_URL="https://${CODESPACE_NAME}-8000.app.github.dev/api/jobs/run-scheduled?wait=${WAIT_PARAM}"
+          echo "Próba wywołania HTTP: $TARGET_URL"
+
+          # Próba bezpośredniego wywołania przez HTTPS port-forwarding Codespaces
+          HTTP_STATUS=$(curl -s -o /tmp/job_resp.json -w "%{http_code}" -X POST "$TARGET_URL" \
+            -H "Authorization: Bearer $CODESPACE_PAT" \
+            -H "X-Github-Token: $CODESPACE_PAT" \
+            -H "Content-Type: application/json" \
+            -d '{"source": "github-actions"}' || echo "000")
+
+          echo "HTTP Status bezpośredniego połączenia: $HTTP_STATUS"
+          cat /tmp/job_resp.json 2>/dev/null || true
+          echo ""
+
+          # Jeśli bezpośrednie połączenie HTTPS nie powiodło się (np. prywatny port lub routing), użyj gh codespace ssh
+          if [ "$HTTP_STATUS" != "200" ] && [ "$HTTP_STATUS" != "202" ]; then
+            echo "Bezpośrednie zapytanie HTTPS zwróciło $HTTP_STATUS. Wywołanie alternatywne przez GitHub CLI (gh codespace ssh)..."
+            echo "$CODESPACE_PAT" | gh auth login --with-token 2>/dev/null || true
+            gh codespace ssh -c "$CODESPACE_NAME" -- \
+              "curl -s -X POST 'http://127.0.0.1:8000/api/jobs/run-scheduled?wait=${WAIT_PARAM}' \
+                -H 'Authorization: Bearer $CODESPACE_PAT' \
+                -H 'Content-Type: application/json' \
+                -d '{\"source\": \"github-actions-ssh\"}'"
+          fi
+
+          echo "Zadanie wybudzenia i uruchomienia harmonogramu zakończone sukcesem."
