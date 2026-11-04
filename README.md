@@ -123,3 +123,17 @@ Wszystkie testy weryfikują m.in.:
 11. Zatrzymanie przed finalizacją płatności w sklepie i blokadę zakupu bez zatwierdzenia.
 12. Ochronę danych kart płatniczych i brak ich logowania.
 13. Pauzę przy wykryciu CAPTCHA / 2FA / SMS w przeglądarce.
+
+---
+
+## ☁️ Uruchomienie w GitHub Codespaces
+
+Darmowy test z lokalnymi modelami (bez Gemini, bez kluczy):
+
+1. Na GitHubie: **Code → Codespaces → ⋯ → New with options**, wybierz maszynę **4-core / 16 GB**.
+2. Przy pierwszym starcie skrypt `.devcontainer/post-create.sh` instaluje Ollamę, zależności Pythona i Chromium (kilka minut).
+3. Przy każdym starcie `.devcontainer/post-start.sh` uruchamia `ollama serve`, pobiera modele `qwen3:4b` (mały, szybki) i `dolphin3:8b` (domyślny, bez cenzury) oraz startuje Orbit na porcie **8000** (zakładka *Ports*).
+4. Agenci korzystają z endpointu Ollamy zgodnego z OpenAI: `LLM_BASE_URL=http://localhost:11434/v1`, `LLM_MODEL=dolphin3:8b`, `LLM_API_KEY=ollama` (wartość zastępcza, nie sekret). Zmiana modelu: `export LLM_MODEL=qwen3:4b` i restart uvicorn.
+5. Logi: `/tmp/orbit.log`, `/tmp/ollama.log`, `/tmp/ollama-pull.log`. Postęp pobierania modeli: `tail -f /tmp/ollama-pull.log`.
+
+Ograniczenia: darmowy limit to 120 rdzeniogodzin/mies. (~30 h na 4 rdzeniach), Codespace zatrzymuje się po ok. 30 min bezczynności, a model 8B na CPU odpowiada wolno (kilka tokenów/s). Konfiguracja Render/Gemini pozostaje bez zmian.
